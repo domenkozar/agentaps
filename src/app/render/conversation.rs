@@ -90,14 +90,14 @@ impl Workspace {
         })
         .w_full()
         .h_full()
-        .p_4();
+        .py_4();
         chat = chat.child(
             div()
                 .flex_1()
                 .min_w(px(0.))
                 .min_h(px(0.))
                 .relative()
-                .child(div().id("chat-scroll").size_full().child(history))
+                .child(div().id("chat-scroll").size_full().px_4().child(history))
                 .vertical_scrollbar(&self.chat_list),
         );
         if agent.active_work {
