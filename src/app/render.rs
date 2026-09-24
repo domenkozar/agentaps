@@ -42,12 +42,17 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .bg(rgb(BG));
-        if self.picker != PickerMode::Closed {
+        if matches!(self.view, WorkspaceView::NewSession { .. }) {
             chat = self.render_picker(chat, cx);
-        } else if let Some((project_index, agent_index)) = self.selected {
+        } else if let Some(SessionLocation {
+            project_index,
+            agent_index,
+        }) = self.view.displayed_session()
+        {
             self.sync_chat_rows(project_index, agent_index);
             chat = self.render_conversation(chat, project_index, agent_index, cx);
         } else {
+            let archived = matches!(self.view, WorkspaceView::Archive { .. });
             chat = chat.child(
                 div()
                     .flex_1()
@@ -56,17 +61,16 @@ impl Render for Workspace {
                     .items_center()
                     .justify_center()
                     .gap_3()
-                    .child(
-                        div()
-                            .text_2xl()
-                            .text_color(rgb(TEXT))
-                            .child("Ready when you are."),
-                    )
-                    .child(
-                        div()
-                            .text_color(rgb(MUTED))
-                            .child("Press Ctrl+P to find a folder and start an agent."),
-                    ),
+                    .child(div().text_2xl().text_color(rgb(TEXT)).child(if archived {
+                        "Archived sessions"
+                    } else {
+                        "Ready when you are."
+                    }))
+                    .child(div().text_color(rgb(MUTED)).child(if archived {
+                        "Select a session to restore it."
+                    } else {
+                        "Press Ctrl+P to find a folder and start an agent."
+                    })),
             );
         }
         if let Some(notice) = &self.notice {

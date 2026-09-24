@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn workspace_view_keeps_sidebar_selection_exclusive() {
+    let first = SessionLocation {
+        project_index: 0,
+        agent_index: 0,
+    };
+    let second = SessionLocation {
+        project_index: 0,
+        agent_index: 1,
+    };
+    let conversation = WorkspaceView::Conversation(first);
+    assert_eq!(conversation.highlighted_session(), Some(first));
+    let archive = conversation.toggle_archive();
+    assert_eq!(archive.highlighted_session(), None);
+    assert_eq!(archive.displayed_session(), Some(first));
+    assert_eq!(archive.toggle_archive(), conversation);
+
+    let folders = conversation.open_picker(PickerStep::Folders);
+    assert_eq!(folders.highlighted_session(), None);
+    assert_eq!(folders.displayed_session(), None);
+    assert_eq!(folders.return_to(), Some(first));
+
+    let agents = folders.open_picker(PickerStep::Agents { project_index: 0 });
+    assert_eq!(agents.highlighted_session(), None);
+    assert_eq!(agents.return_to(), Some(first));
+
+    assert_eq!(agents.toggle_archive(), archive);
+
+    let updated = agents.session_archived(first, Some(second));
+    assert_eq!(updated.highlighted_session(), None);
+    assert_eq!(updated.return_to(), Some(second));
+    assert_eq!(
+        updated.toggle_archive().toggle_archive(),
+        WorkspaceView::Conversation(second)
+    );
+    assert_eq!(
+        conversation.session_archived(first, None),
+        WorkspaceView::Empty
+    );
+}
+
+#[test]
 fn archive_icons_are_bundled() {
     assert!(
         gpui::AssetSource::load(&Assets, "icons/inbox.svg")

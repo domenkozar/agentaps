@@ -3,6 +3,8 @@ use super::*;
 impl Workspace {
     pub(super) fn render_sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let session_query = self.sidebar_search.read(cx).value().trim().to_owned();
+        let archive_view = matches!(self.view, WorkspaceView::Archive { .. });
+        let new_session_view = matches!(self.view, WorkspaceView::NewSession { .. });
         let mut visible_sessions = 0;
         let mut project_list = div().flex().flex_col().gap_1();
         let mut archived_list = div().flex().flex_col().gap_1();
@@ -32,7 +34,7 @@ impl Workspace {
         });
         for (project_index, agent_index, project, agent) in rows {
             let archived = agent.config.archived;
-            if archived != self.show_archived {
+            if archived != archive_view {
                 continue;
             }
             let name = project
@@ -53,7 +55,11 @@ impl Workspace {
                 continue;
             }
             visible_sessions += 1;
-            let selected = self.selected == Some((project_index, agent_index));
+            let selected = self.view.highlighted_session()
+                == Some(SessionLocation {
+                    project_index,
+                    agent_index,
+                });
             let agent_id = agent.config.id;
             let row_group = format!("agent-row-{agent_id}");
             let row = div()
@@ -75,9 +81,10 @@ impl Workspace {
                         this.set_archived(project_index, agent_index, false, window, cx);
                         return;
                     }
-                    this.selected = Some((project_index, agent_index));
-                    this.selected_project = Some(project_index);
-                    this.picker = PickerMode::Closed;
+                    this.view = WorkspaceView::Conversation(SessionLocation {
+                        project_index,
+                        agent_index,
+                    });
                     this.composer
                         .update(cx, |input, cx| input.focus(window, cx));
                     cx.notify();
@@ -162,7 +169,7 @@ impl Workspace {
             }
         }
         for (project_index, project) in self.projects.iter().enumerate() {
-            if self.show_archived {
+            if archive_view {
                 break;
             }
             if project.agents.is_empty() {
@@ -195,9 +202,7 @@ impl Workspace {
                         .cursor_pointer()
                         .hover(|style| style.bg(rgb(HOVER)))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.selected_project = Some(project_index);
-                            this.selected = None;
-                            this.open_picker(PickerMode::Agents, window, cx);
+                            this.open_picker(PickerStep::Agents { project_index }, window, cx);
                         }))
                         .child(
                             div()
@@ -221,7 +226,7 @@ impl Workspace {
                 );
             }
         }
-        if self.show_archived {
+        if archive_view {
             project_list = archived_list;
         }
         if visible_sessions == 0 && !session_query.is_empty() {
@@ -233,7 +238,7 @@ impl Workspace {
                     .text_color(rgb(MUTED))
                     .child("No matching sessions"),
             );
-        } else if self.show_archived && archived_count == 0 {
+        } else if archive_view && archived_count == 0 {
             project_list = project_list.child(
                 div()
                     .px_3()
@@ -245,7 +250,7 @@ impl Workspace {
         }
         let viewport_width = f32::from(window.viewport_size().width);
         let sidebar_width = (viewport_width * self.sidebar_fraction).max(180.);
-        let archive_tooltip = if self.show_archived {
+        let archive_tooltip = if archive_view {
             "Show active sessions"
         } else {
             "Show archived sessions"
@@ -281,24 +286,20 @@ impl Workspace {
                             .min_w(px(0.))
                             .rounded_md()
                             .border_1()
-                            .border_color(rgb(if self.show_archived { ACCENT } else { SIDEBAR }))
-                            .bg(rgb(if self.show_archived {
-                                SELECTED
-                            } else {
-                                SIDEBAR
-                            }))
+                            .border_color(rgb(if archive_view { ACCENT } else { SIDEBAR }))
+                            .bg(rgb(if archive_view { SELECTED } else { SIDEBAR }))
                             .px_2()
                             .py_2()
                             .flex()
                             .items_center()
                             .gap_1()
                             .text_xs()
-                            .text_color(rgb(if self.show_archived { TEXT } else { MUTED }))
+                            .text_color(rgb(if archive_view { TEXT } else { MUTED }))
                             .hover(|style| style.bg(rgb(DROP_TARGET)).text_color(rgb(TEXT)))
                             .child(
                                 Icon::new(IconName::Inbox)
                                     .size(px(14.))
-                                    .text_color(rgb(if self.show_archived { TEXT } else { MUTED })),
+                                    .text_color(rgb(if archive_view { TEXT } else { MUTED })),
                             )
                             .child("Archive")
                             .child(format!("{archived_count}"))
@@ -306,9 +307,8 @@ impl Workspace {
                                 Tooltip::new(archive_tooltip).build(window, cx)
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.show_archived = !this.show_archived;
-                                this.picker = PickerMode::Closed;
-                                if this.selected.is_some() {
+                                this.view = this.view.toggle_archive();
+                                if this.view.displayed_session().is_some() {
                                     this.composer
                                         .update(cx, |input, cx| input.focus(window, cx));
                                 } else {
@@ -325,39 +325,25 @@ impl Workspace {
                             .flex_shrink_0()
                             .rounded_md()
                             .border_1()
-                            .border_color(rgb(if self.picker != PickerMode::Closed {
-                                ACCENT
-                            } else {
-                                SIDEBAR
-                            }))
-                            .bg(rgb(if self.picker != PickerMode::Closed {
-                                SELECTED
-                            } else {
-                                SIDEBAR
-                            }))
+                            .border_color(rgb(if new_session_view { ACCENT } else { SIDEBAR }))
+                            .bg(rgb(if new_session_view { SELECTED } else { SIDEBAR }))
                             .px_2()
                             .py_2()
                             .flex()
                             .items_center()
                             .gap_1()
                             .text_xs()
-                            .text_color(rgb(if self.picker != PickerMode::Closed {
-                                TEXT
-                            } else {
-                                MUTED
-                            }))
+                            .text_color(rgb(if new_session_view { TEXT } else { MUTED }))
                             .hover(|style| style.bg(rgb(HOVER)).text_color(rgb(TEXT)))
-                            .child(Icon::new(IconName::Plus).size(px(14.)).text_color(rgb(
-                                if self.picker != PickerMode::Closed {
-                                    TEXT
-                                } else {
-                                    MUTED
-                                },
-                            )))
+                            .child(
+                                Icon::new(IconName::Plus)
+                                    .size(px(14.))
+                                    .text_color(rgb(if new_session_view { TEXT } else { MUTED })),
+                            )
                             .child("New")
                             .tooltip(|window, cx| Tooltip::new("Open folder").build(window, cx))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_picker(PickerMode::Folders, window, cx)
+                                this.open_picker(PickerStep::Folders, window, cx)
                             })),
                     ),
             );

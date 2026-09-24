@@ -2,7 +2,10 @@ use super::*;
 
 impl Workspace {
     pub(super) fn render_picker(&self, mut chat: Div, cx: &mut Context<Self>) -> Div {
-        let is_folders = self.picker == PickerMode::Folders;
+        let WorkspaceView::NewSession { step, return_to } = self.view else {
+            return chat;
+        };
+        let is_folders = step == PickerStep::Folders;
         let query = self.picker_input.read(cx).value().to_string();
         let mut results = div().flex().flex_col().gap_1();
         if is_folders {
@@ -171,11 +174,12 @@ impl Workspace {
                 );
             }
         }
-        let project_path = self
-            .selected_project
-            .and_then(|index| self.projects.get(index))
-            .map(|project| project.path.display().to_string())
-            .unwrap_or_default();
+        let project_path = match step {
+            PickerStep::Agents { project_index } => self.projects.get(project_index),
+            PickerStep::Folders => None,
+        }
+        .map(|project| project.path.display().to_string())
+        .unwrap_or_default();
         chat = chat.child(
             div()
                 .id("picker-page")
@@ -205,7 +209,7 @@ impl Workspace {
                                         .text_color(rgb(ACCENT))
                                         .child("NEW SESSION"),
                                 )
-                                .when(!is_folders || self.selected.is_some(), |element| {
+                                .when(!is_folders || return_to.is_some(), |element| {
                                     element.child(
                                         div()
                                             .id("picker-back")
@@ -284,7 +288,7 @@ impl Workspace {
                         )
                         .child(results)
                         .child(div().pt_3().text_xs().text_color(rgb(MUTED)).child(
-                            if is_folders && self.selected.is_none() {
+                            if is_folders && return_to.is_none() {
                                 "↑ ↓ Navigate  ·  Enter Select"
                             } else {
                                 "↑ ↓ Navigate  ·  Enter Select  ·  Esc Back"

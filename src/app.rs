@@ -61,11 +61,89 @@ fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
 
 actions!(workspace, [QuickOpen]);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PickerMode {
-    Closed,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SessionLocation {
+    project_index: usize,
+    agent_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PickerStep {
     Folders,
-    Agents,
+    Agents { project_index: usize },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceView {
+    Empty,
+    Conversation(SessionLocation),
+    Archive {
+        return_to: Option<SessionLocation>,
+    },
+    NewSession {
+        step: PickerStep,
+        return_to: Option<SessionLocation>,
+    },
+}
+
+impl WorkspaceView {
+    fn highlighted_session(self) -> Option<SessionLocation> {
+        match self {
+            Self::Conversation(session) => Some(session),
+            _ => None,
+        }
+    }
+
+    fn return_to(self) -> Option<SessionLocation> {
+        match self {
+            Self::Conversation(session) => Some(session),
+            Self::Archive { return_to } | Self::NewSession { return_to, .. } => return_to,
+            Self::Empty => None,
+        }
+    }
+
+    fn displayed_session(self) -> Option<SessionLocation> {
+        match self {
+            Self::Conversation(session) => Some(session),
+            Self::Archive { return_to } => return_to,
+            Self::Empty | Self::NewSession { .. } => None,
+        }
+    }
+
+    fn open_picker(self, step: PickerStep) -> Self {
+        Self::NewSession {
+            step,
+            return_to: self.return_to(),
+        }
+    }
+
+    fn toggle_archive(self) -> Self {
+        match self {
+            Self::Archive { return_to } => return_to.map(Self::Conversation).unwrap_or(Self::Empty),
+            _ => Self::Archive {
+                return_to: self.return_to(),
+            },
+        }
+    }
+
+    fn session_archived(self, archived: SessionLocation, next: Option<SessionLocation>) -> Self {
+        match self {
+            Self::Conversation(session) if session == archived => {
+                next.map(Self::Conversation).unwrap_or(Self::Empty)
+            }
+            Self::Archive {
+                return_to: Some(session),
+            } if session == archived => Self::Archive { return_to: next },
+            Self::NewSession {
+                step,
+                return_to: Some(session),
+            } if session == archived => Self::NewSession {
+                step,
+                return_to: next,
+            },
+            _ => self,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -127,11 +205,9 @@ struct ChatRow {
 
 struct Workspace {
     projects: Vec<ProjectView>,
-    selected: Option<(usize, usize)>,
-    selected_project: Option<usize>,
+    view: WorkspaceView,
     sidebar_order: Vec<u64>,
     sidebar_fraction: f32,
-    show_archived: bool,
     collapsed_tool_groups: HashSet<(u64, usize)>,
     expanded_tool_rows: HashSet<(u64, usize)>,
     next_agent_id: u64,
@@ -141,7 +217,6 @@ struct Workspace {
     folders: Vec<PathBuf>,
     folder_scan_complete: bool,
     available_agents: Vec<AgentChoice>,
-    picker: PickerMode,
     picker_selection: usize,
     slash_selection: usize,
     slash_dismissed: bool,
@@ -333,7 +408,6 @@ impl Workspace {
                 sidebar_order.push(id);
             }
         }
-        let selected_project = (!projects.is_empty()).then_some(0);
         let recent_folders = projects
             .iter()
             .map(|project| project.path.clone())
@@ -344,11 +418,9 @@ impl Workspace {
         });
         let mut this = Self {
             projects,
-            selected: None,
-            selected_project,
+            view: WorkspaceView::Empty,
             sidebar_order,
             sidebar_fraction,
-            show_archived: false,
             collapsed_tool_groups: HashSet::new(),
             expanded_tool_rows: HashSet::new(),
             next_agent_id,
@@ -358,7 +430,6 @@ impl Workspace {
             folders: recent_folders,
             folder_scan_complete: false,
             available_agents: installed_agents(),
-            picker: PickerMode::Closed,
             picker_selection: 0,
             slash_selection: 0,
             slash_dismissed: false,
@@ -373,6 +444,7 @@ impl Workspace {
             notice,
             _subscriptions,
         };
+        let mut selected = None;
         for project_index in 0..this.projects.len() {
             for agent_index in 0..this.projects[project_index].agents.len() {
                 if this.projects[project_index].agents[agent_index]
@@ -382,8 +454,10 @@ impl Workspace {
                     continue;
                 }
                 this.connect(project_index, agent_index);
-                this.selected.get_or_insert((project_index, agent_index));
-                this.selected_project.get_or_insert(project_index);
+                selected.get_or_insert(SessionLocation {
+                    project_index,
+                    agent_index,
+                });
             }
         }
         if let Some(first_id) = this.sidebar_order.iter().find(|id| {
@@ -400,29 +474,40 @@ impl Workspace {
                     .iter()
                     .position(|agent| agent.config.id == *first_id)
                 {
-                    this.selected = Some((project_index, agent_index));
-                    this.selected_project = Some(project_index);
+                    selected = Some(SessionLocation {
+                        project_index,
+                        agent_index,
+                    });
                     break;
                 }
             }
         }
-        if this.selected.is_none() {
-            this.picker = if this
+        if let Some(session) = selected {
+            this.view = WorkspaceView::Conversation(session);
+            this.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            this.view = if this
                 .projects
                 .iter()
                 .any(|project| project.agents.iter().any(|agent| agent.config.archived))
             {
-                PickerMode::Closed
-            } else if this.selected_project.is_some() {
-                PickerMode::Agents
+                WorkspaceView::Empty
+            } else if !this.projects.is_empty() {
+                WorkspaceView::NewSession {
+                    step: PickerStep::Agents { project_index: 0 },
+                    return_to: None,
+                }
             } else {
-                PickerMode::Folders
+                WorkspaceView::NewSession {
+                    step: PickerStep::Folders,
+                    return_to: None,
+                }
             };
-            this.picker_input
-                .update(cx, |input, cx| input.focus(window, cx));
-        } else {
-            this.composer
-                .update(cx, |input, cx| input.focus(window, cx));
+            if matches!(this.view, WorkspaceView::NewSession { .. }) {
+                this.picker_input
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
         }
         cx.spawn(async move |this, cx| {
             let mut ticks = 0u32;
@@ -481,16 +566,15 @@ impl Workspace {
         }
     }
 
-    fn open_picker(&mut self, mode: PickerMode, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_archived = false;
-        self.picker = mode;
+    fn open_picker(&mut self, step: PickerStep, window: &mut Window, cx: &mut Context<Self>) {
+        self.view = self.view.open_picker(step);
         self.picker_selection = 0;
         self.picker_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.set_placeholder(
-                match mode {
-                    PickerMode::Agents => "Search installed agents or enter an ACP command…",
-                    _ => "Search folders by name or path…",
+                match step {
+                    PickerStep::Agents { .. } => "Search installed agents or enter an ACP command…",
+                    PickerStep::Folders => "Search folders by name or path…",
                 },
                 window,
                 cx,
@@ -501,11 +585,16 @@ impl Workspace {
     }
 
     fn back_from_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.picker {
-            PickerMode::Agents => self.open_picker(PickerMode::Folders, window, cx),
-            PickerMode::Folders if self.selected.is_some() => {
-                self.picker = PickerMode::Closed;
-                self.selected_project = self.selected.map(|(project_index, _)| project_index);
+        match self.view {
+            WorkspaceView::NewSession {
+                step: PickerStep::Agents { .. },
+                ..
+            } => self.open_picker(PickerStep::Folders, window, cx),
+            WorkspaceView::NewSession {
+                step: PickerStep::Folders,
+                return_to: Some(session),
+            } => {
+                self.view = WorkspaceView::Conversation(session);
                 self.composer
                     .update(cx, |input, cx| input.focus(window, cx));
                 cx.notify();
@@ -571,10 +660,8 @@ impl Workspace {
             self.persist();
             self.projects.len() - 1
         };
-        self.selected_project = Some(project_index);
-        self.selected = None;
         self.notice = None;
-        self.open_picker(PickerMode::Agents, window, cx);
+        self.open_picker(PickerStep::Agents { project_index }, window, cx);
     }
 
     fn start_agent(
@@ -584,7 +671,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(project_index) = self.selected_project else {
+        let WorkspaceView::NewSession {
+            step: PickerStep::Agents { project_index },
+            ..
+        } = self.view
+        else {
             self.notice = Some("Choose a project first".into());
             cx.notify();
             return;
@@ -609,9 +700,11 @@ impl Workspace {
         self.projects[project_index]
             .agents
             .push(AgentView::new(config));
-        self.selected = Some((project_index, agent_index));
+        self.view = WorkspaceView::Conversation(SessionLocation {
+            project_index,
+            agent_index,
+        });
         self.connect(project_index, agent_index);
-        self.picker = PickerMode::Closed;
         self.notice = None;
         self.persist();
         self.composer
@@ -640,15 +733,24 @@ impl Workspace {
         }
         agent.config.archived = archived;
         if archived {
-            if self.selected == Some((project_index, agent_index)) {
-                self.selected = self.sidebar_order.iter().find_map(|id| {
+            let location = SessionLocation {
+                project_index,
+                agent_index,
+            };
+            if self.view.return_to() == Some(location) {
+                let next = self.sidebar_order.iter().find_map(|id| {
                     self.projects.iter().enumerate().find_map(|(pi, project)| {
                         project.agents.iter().enumerate().find_map(|(ai, agent)| {
-                            (agent.config.id == *id && !agent.config.archived).then_some((pi, ai))
+                            (agent.config.id == *id && !agent.config.archived).then_some(
+                                SessionLocation {
+                                    project_index: pi,
+                                    agent_index: ai,
+                                },
+                            )
                         })
                     })
                 });
-                self.selected_project = self.selected.map(|(pi, _)| pi);
+                self.view = self.view.session_archived(location, next);
             }
         } else {
             if self.projects[project_index].agents[agent_index]
@@ -657,9 +759,10 @@ impl Workspace {
             {
                 self.connect(project_index, agent_index);
             }
-            self.show_archived = false;
-            self.selected = Some((project_index, agent_index));
-            self.selected_project = Some(project_index);
+            self.view = WorkspaceView::Conversation(SessionLocation {
+                project_index,
+                agent_index,
+            });
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
         }
@@ -668,8 +771,11 @@ impl Workspace {
     }
 
     fn confirm_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.picker {
-            PickerMode::Folders => {
+        match self.view {
+            WorkspaceView::NewSession {
+                step: PickerStep::Folders,
+                ..
+            } => {
                 if let Some(path) = self.folder_results(cx).get(self.picker_selection).cloned() {
                     self.select_folder(path, window, cx);
                 } else {
@@ -678,14 +784,17 @@ impl Workspace {
                     cx.notify();
                 }
             }
-            PickerMode::Agents => {
+            WorkspaceView::NewSession {
+                step: PickerStep::Agents { .. },
+                ..
+            } => {
                 if let Some(agent) = self.agent_results(cx).get(self.picker_selection).cloned() {
                     self.start_agent(agent.command, Some(agent.name), window, cx);
                 } else {
                     self.start_custom_agent(window, cx);
                 }
             }
-            PickerMode::Closed => {}
+            _ => {}
         }
     }
 
@@ -701,7 +810,7 @@ impl Workspace {
     }
 
     fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_picker(PickerMode::Folders, window, cx);
+        self.open_picker(PickerStep::Folders, window, cx);
     }
 
     fn picker_key_down(
@@ -710,16 +819,15 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.picker == PickerMode::Closed {
+        let WorkspaceView::NewSession { step, .. } = self.view else {
             return;
-        }
-        let count = match self.picker {
-            PickerMode::Folders => self.folder_results(cx).len(),
-            PickerMode::Agents => {
+        };
+        let count = match step {
+            PickerStep::Folders => self.folder_results(cx).len(),
+            PickerStep::Agents { .. } => {
                 self.agent_results(cx).len()
                     + usize::from(!self.picker_input.read(cx).value().trim().is_empty())
             }
-            PickerMode::Closed => 0,
         };
         match event.keystroke.key.as_str() {
             "down" if count > 0 => {
@@ -741,10 +849,14 @@ impl Workspace {
     }
 
     fn slash_results(&self, cx: &Context<Self>) -> Vec<SlashCommand> {
-        if self.slash_dismissed || self.picker != PickerMode::Closed {
+        if self.slash_dismissed {
             return Vec::new();
         }
-        let Some((project_index, agent_index)) = self.selected else {
+        let Some(SessionLocation {
+            project_index,
+            agent_index,
+        }) = self.view.displayed_session()
+        else {
             return Vec::new();
         };
         let draft = self.composer.read(cx).value().to_string();

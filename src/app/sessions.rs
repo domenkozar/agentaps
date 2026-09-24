@@ -32,7 +32,11 @@ impl Workspace {
     }
 
     pub(super) fn send_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((project_index, agent_index)) = self.selected else {
+        let Some(SessionLocation {
+            project_index,
+            agent_index,
+        }) = self.view.displayed_session()
+        else {
             return;
         };
         let value = self.composer.read(cx).value().to_string();
@@ -77,7 +81,11 @@ impl Workspace {
     }
 
     pub(super) fn cancel_prompt(&mut self, cx: &mut Context<Self>) {
-        if let Some((project_index, agent_index)) = self.selected {
+        if let Some(SessionLocation {
+            project_index,
+            agent_index,
+        }) = self.view.displayed_session()
+        {
             let agent = &mut self.projects[project_index].agents[agent_index];
             if agent.active_work
                 && !agent.cancel_requested
@@ -102,7 +110,11 @@ impl Workspace {
         option_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some((project_index, agent_index)) = self.selected else {
+        let Some(SessionLocation {
+            project_index,
+            agent_index,
+        }) = self.view.displayed_session()
+        else {
             return;
         };
         let agent = &mut self.projects[project_index].agents[agent_index];
