@@ -482,6 +482,7 @@ impl Workspace {
     }
 
     fn open_picker(&mut self, mode: PickerMode, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_archived = false;
         self.picker = mode;
         self.picker_selection = 0;
         self.picker_input.update(cx, |input, cx| {

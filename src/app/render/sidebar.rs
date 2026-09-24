@@ -305,8 +305,16 @@ impl Workspace {
                             .tooltip(move |window, cx| {
                                 Tooltip::new(archive_tooltip).build(window, cx)
                             })
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
                                 this.show_archived = !this.show_archived;
+                                this.picker = PickerMode::Closed;
+                                if this.selected.is_some() {
+                                    this.composer
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                } else {
+                                    this.sidebar_search
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                }
                                 cx.notify();
                             })),
                     )
@@ -317,16 +325,35 @@ impl Workspace {
                             .flex_shrink_0()
                             .rounded_md()
                             .border_1()
-                            .border_color(rgb(SIDEBAR))
+                            .border_color(rgb(if self.picker != PickerMode::Closed {
+                                ACCENT
+                            } else {
+                                SIDEBAR
+                            }))
+                            .bg(rgb(if self.picker != PickerMode::Closed {
+                                SELECTED
+                            } else {
+                                SIDEBAR
+                            }))
                             .px_2()
                             .py_2()
                             .flex()
                             .items_center()
                             .gap_1()
                             .text_xs()
-                            .text_color(rgb(MUTED))
+                            .text_color(rgb(if self.picker != PickerMode::Closed {
+                                TEXT
+                            } else {
+                                MUTED
+                            }))
                             .hover(|style| style.bg(rgb(HOVER)).text_color(rgb(TEXT)))
-                            .child(Icon::new(IconName::Plus).size(px(14.)))
+                            .child(Icon::new(IconName::Plus).size(px(14.)).text_color(rgb(
+                                if self.picker != PickerMode::Closed {
+                                    TEXT
+                                } else {
+                                    MUTED
+                                },
+                            )))
                             .child("New")
                             .tooltip(|window, cx| Tooltip::new("Open folder").build(window, cx))
                             .on_click(cx.listener(|this, _, window, cx| {
