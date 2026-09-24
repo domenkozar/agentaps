@@ -25,7 +25,6 @@ pub const SELECTED: u32 = 0x30485f;
 pub const DROP_TARGET: u32 = 0x395871;
 pub const USER_BUBBLE: u32 = 0x29465c;
 pub const AGENT_BUBBLE: u32 = 0x202e3b;
-pub const CHIP: u32 = 0x364e63;
 pub const ACCENT_SURFACE: u32 = 0x304b60;
 
 pub const STATUS_CONNECTING: u32 = 0xa2b0be;
@@ -34,8 +33,6 @@ pub const STATUS_WORKING: u32 = 0xe9b978;
 pub const STATUS_DONE: u32 = 0x84c8a7;
 pub const STATUS_ERROR: u32 = 0xe99191;
 
-pub const AGENT_PICKER_CHIP: u32 = ACCENT_SURFACE;
-pub const AGENT_PICKER_TEXT: u32 = ACCENT;
 pub const TOOL_MARKER: u32 = STATUS_WORKING;
 pub const PERMISSION_BORDER: u32 = 0xc99463;
 pub const ERROR_SURFACE: u32 = 0x51343a;
