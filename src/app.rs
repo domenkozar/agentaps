@@ -1,0 +1,827 @@
+use crate::acp::{Connection, Event};
+use crate::config::{AgentConfig, ChatEntry, Config, ProjectConfig, Role, SlashCommand};
+use crate::discovery::{AgentChoice, discover_folders, folder_matches, installed_agents, score};
+use crate::theme::*;
+use crate::{config, theme};
+use agent_client_protocol_schema::{ProtocolVersion, v2};
+use gpui::{
+    App, Application, Bounds, Context, DragMoveEvent, Entity, Focusable, IntoElement, KeyBinding,
+    KeyDownEvent, MouseButton, Render, ScrollHandle, StatefulInteractiveElement, Subscription,
+    Timer, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, relative, rems, rgb,
+    size,
+};
+use gpui_component::{
+    ActiveTheme, Icon, IconName, Root,
+    input::{
+        Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp, Position,
+    },
+    scroll::ScrollableElement,
+    text::{TextView, TextViewStyle},
+    tooltip::Tooltip,
+};
+use gpui_component_assets::Assets;
+use serde_json::{Value, json};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc::{self, Receiver, Sender},
+    time::{Duration, Instant},
+};
+
+mod agent;
+mod render;
+mod sessions;
+#[cfg(test)]
+mod tests;
+mod tool_activity;
+
+use self::{agent::*, tool_activity::*};
+
+fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
+    let Some(from) = order.iter().position(|id| *id == dragged) else {
+        return false;
+    };
+    let Some(to) = order.iter().position(|id| *id == target) else {
+        return false;
+    };
+    if from == to {
+        return false;
+    }
+    order.remove(from);
+    let target_index = order.iter().position(|id| *id == target).unwrap();
+    let insert_at = if from < to {
+        target_index + 1
+    } else {
+        target_index
+    };
+    order.insert(insert_at, dragged);
+    true
+}
+
+actions!(workspace, [QuickOpen]);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PickerMode {
+    Closed,
+    Folders,
+    Agents,
+}
+
+#[derive(Clone, Copy)]
+enum SlashAction {
+    Up,
+    Down,
+    Complete,
+    Dismiss,
+}
+
+struct ProjectView {
+    path: PathBuf,
+    branch: String,
+    agents: Vec<AgentView>,
+}
+
+#[derive(Clone)]
+struct AgentDrag {
+    id: u64,
+    label: String,
+}
+
+impl Render for AgentDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .bg(rgb(SELECTED))
+            .text_sm()
+            .text_color(rgb(TEXT))
+            .child(self.label.clone())
+    }
+}
+
+#[derive(Clone)]
+struct SidebarResize;
+
+impl Render for SidebarResize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size(px(1.))
+    }
+}
+
+struct Workspace {
+    projects: Vec<ProjectView>,
+    selected: Option<(usize, usize)>,
+    selected_project: Option<usize>,
+    sidebar_order: Vec<u64>,
+    sidebar_fraction: f32,
+    show_archived: bool,
+    collapsed_tool_groups: HashSet<(u64, usize)>,
+    expanded_tool_rows: HashSet<(u64, usize)>,
+    next_agent_id: u64,
+    events_tx: Sender<Event>,
+    events_rx: Receiver<Event>,
+    folders_rx: Receiver<Vec<PathBuf>>,
+    folders: Vec<PathBuf>,
+    folder_scan_complete: bool,
+    available_agents: Vec<AgentChoice>,
+    picker: PickerMode,
+    picker_selection: usize,
+    slash_selection: usize,
+    slash_dismissed: bool,
+    picker_input: Entity<InputState>,
+    sidebar_search: Entity<InputState>,
+    composer: Entity<InputState>,
+    chat_scroll: ScrollHandle,
+    dirty: bool,
+    last_saved: Instant,
+    notice: Option<String>,
+    _subscriptions: Vec<Subscription>,
+}
+
+fn branch(path: &Path) -> String {
+    for args in [
+        vec!["symbolic-ref", "--quiet", "--short", "HEAD"],
+        vec!["rev-parse", "--short", "HEAD"],
+    ] {
+        if let Ok(output) = Command::new("git").arg("-C").arg(path).args(args).output()
+            && output.status.success()
+        {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !text.is_empty() {
+                return text;
+            }
+        }
+    }
+    "no git branch".into()
+}
+
+fn compact_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}m", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.0}k", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
+}
+
+fn submitted_prompt(value: &str) -> String {
+    value.strip_suffix('\n').unwrap_or(value).to_owned()
+}
+
+fn parse_available_commands(update: &Value) -> Vec<SlashCommand> {
+    update["availableCommands"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|command| {
+            let name = command["name"].as_str()?.trim().trim_start_matches('/');
+            if name.is_empty() || name.chars().any(char::is_whitespace) {
+                return None;
+            }
+            Some(SlashCommand {
+                name: name.to_owned(),
+                description: command["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                input: command.get("input").cloned(),
+            })
+        })
+        .collect()
+}
+
+fn slash_query(draft: &str) -> Option<&str> {
+    let query = draft.strip_prefix('/')?;
+    if query.chars().any(char::is_whitespace) {
+        None
+    } else {
+        Some(query)
+    }
+}
+
+fn matching_slash_commands(commands: &[SlashCommand], draft: &str) -> Vec<SlashCommand> {
+    let Some(query) = slash_query(draft) else {
+        return Vec::new();
+    };
+    let query = query.to_lowercase();
+    commands
+        .iter()
+        .filter(|command| command.name.to_lowercase().starts_with(&query))
+        .take(8)
+        .cloned()
+        .collect()
+}
+
+fn completed_slash_text(command: &SlashCommand) -> String {
+    let suffix = if command.input_hint().is_some() {
+        " "
+    } else {
+        ""
+    };
+    format!("/{}{suffix}", command.name)
+}
+
+impl Workspace {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let picker_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search folders by name or path…"));
+        let sidebar_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search sessions…"));
+        let composer = cx.new(|cx| {
+            InputState::new(window, cx)
+                .auto_grow(1, 6)
+                .placeholder("Ask your agent…")
+        });
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &sidebar_search,
+                window,
+                |_, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &picker_input,
+                window,
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        this.picker_selection = 0;
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { secondary: false } => {
+                        this.confirm_picker(window, cx);
+                    }
+                    _ => {}
+                },
+            ),
+            cx.subscribe_in(
+                &composer,
+                window,
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        this.slash_selection = 0;
+                        this.slash_dismissed = false;
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { secondary: false } => this.send_prompt(window, cx),
+                    _ => {}
+                },
+            ),
+        ];
+        let (events_tx, events_rx) = mpsc::channel();
+        let (config, migrate_config, notice) = match config::load() {
+            Ok((config, migrate)) => (config, migrate, None),
+            Err(error) => (
+                Config::default(),
+                false,
+                Some(format!("Could not load config: {error}")),
+            ),
+        };
+        let next_agent_id = config
+            .projects
+            .iter()
+            .flat_map(|project| &project.agents)
+            .map(|agent| agent.id)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let mut sidebar_order = config.sidebar_order;
+        let sidebar_fraction = if config.sidebar_fraction.is_finite() {
+            config.sidebar_fraction.clamp(0.1, 0.7)
+        } else {
+            0.2
+        };
+        let projects: Vec<ProjectView> = config
+            .projects
+            .into_iter()
+            .map(|project| ProjectView {
+                branch: branch(&project.path),
+                path: project.path,
+                agents: project.agents.into_iter().map(AgentView::new).collect(),
+            })
+            .collect();
+        let agent_ids: Vec<u64> = projects
+            .iter()
+            .flat_map(|project| project.agents.iter().map(|agent| agent.config.id))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        sidebar_order.retain(|id| agent_ids.contains(id) && seen.insert(*id));
+        for id in agent_ids {
+            if seen.insert(id) {
+                sidebar_order.push(id);
+            }
+        }
+        let selected_project = (!projects.is_empty()).then_some(0);
+        let recent_folders = projects
+            .iter()
+            .map(|project| project.path.clone())
+            .collect();
+        let (folders_tx, folders_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = folders_tx.send(discover_folders());
+        });
+        let mut this = Self {
+            projects,
+            selected: None,
+            selected_project,
+            sidebar_order,
+            sidebar_fraction,
+            show_archived: false,
+            collapsed_tool_groups: HashSet::new(),
+            expanded_tool_rows: HashSet::new(),
+            next_agent_id,
+            events_tx,
+            events_rx,
+            folders_rx,
+            folders: recent_folders,
+            folder_scan_complete: false,
+            available_agents: installed_agents(),
+            picker: PickerMode::Closed,
+            picker_selection: 0,
+            slash_selection: 0,
+            slash_dismissed: false,
+            picker_input,
+            sidebar_search,
+            composer,
+            chat_scroll: ScrollHandle::new(),
+            dirty: migrate_config,
+            last_saved: Instant::now(),
+            notice,
+            _subscriptions,
+        };
+        for project_index in 0..this.projects.len() {
+            for agent_index in 0..this.projects[project_index].agents.len() {
+                if this.projects[project_index].agents[agent_index]
+                    .config
+                    .archived
+                {
+                    continue;
+                }
+                this.connect(project_index, agent_index);
+                this.selected.get_or_insert((project_index, agent_index));
+                this.selected_project.get_or_insert(project_index);
+            }
+        }
+        if let Some(first_id) = this.sidebar_order.iter().find(|id| {
+            this.projects.iter().any(|project| {
+                project
+                    .agents
+                    .iter()
+                    .any(|agent| agent.config.id == **id && !agent.config.archived)
+            })
+        }) {
+            for (project_index, project) in this.projects.iter().enumerate() {
+                if let Some(agent_index) = project
+                    .agents
+                    .iter()
+                    .position(|agent| agent.config.id == *first_id)
+                {
+                    this.selected = Some((project_index, agent_index));
+                    this.selected_project = Some(project_index);
+                    break;
+                }
+            }
+        }
+        if this.selected.is_none() {
+            this.picker = if this
+                .projects
+                .iter()
+                .any(|project| project.agents.iter().any(|agent| agent.config.archived))
+            {
+                PickerMode::Closed
+            } else if this.selected_project.is_some() {
+                PickerMode::Agents
+            } else {
+                PickerMode::Folders
+            };
+            this.picker_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            this.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.spawn(async move |this, cx| {
+            let mut ticks = 0u32;
+            loop {
+                Timer::after(Duration::from_millis(100)).await;
+                if this
+                    .update(cx, |this, cx| {
+                        this.poll_events(cx);
+                        if let Ok(mut folders) = this.folders_rx.try_recv() {
+                            folders
+                                .extend(this.projects.iter().map(|project| project.path.clone()));
+                            folders.sort();
+                            folders.dedup();
+                            this.folders = folders;
+                            this.folder_scan_complete = true;
+                            cx.notify();
+                        }
+                        ticks += 1;
+                        if ticks >= 50 {
+                            ticks = 0;
+                            this.refresh_branches(cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+        this
+    }
+
+    fn config(&self) -> Config {
+        Config {
+            projects: self
+                .projects
+                .iter()
+                .map(|project| ProjectConfig {
+                    path: project.path.clone(),
+                    agents: project.agents.iter().map(AgentView::snapshot).collect(),
+                })
+                .collect(),
+            sidebar_order: self.sidebar_order.clone(),
+            sidebar_fraction: self.sidebar_fraction,
+        }
+    }
+
+    fn persist(&mut self) {
+        if let Err(error) = config::save(&self.config()) {
+            self.notice = Some(format!("Could not save config: {error}"));
+            self.dirty = true;
+        } else {
+            self.dirty = false;
+            self.last_saved = Instant::now();
+        }
+    }
+
+    fn open_picker(&mut self, mode: PickerMode, window: &mut Window, cx: &mut Context<Self>) {
+        self.picker = mode;
+        self.picker_selection = 0;
+        self.picker_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_placeholder(
+                match mode {
+                    PickerMode::Agents => "Search installed agents or enter an ACP command…",
+                    _ => "Search folders by name or path…",
+                },
+                window,
+                cx,
+            );
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn back_from_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.picker {
+            PickerMode::Agents => self.open_picker(PickerMode::Folders, window, cx),
+            PickerMode::Folders if self.selected.is_some() => {
+                self.picker = PickerMode::Closed;
+                self.selected_project = self.selected.map(|(project_index, _)| project_index);
+                self.composer
+                    .update(cx, |input, cx| input.focus(window, cx));
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    fn folder_results(&self, cx: &Context<Self>) -> Vec<PathBuf> {
+        let query = self.picker_input.read(cx).value().to_string();
+        let mut matches = folder_matches(&self.folders, query.trim(), 14);
+        if let Ok(path) = PathBuf::from(query.trim()).canonicalize()
+            && path.is_dir()
+            && !matches.contains(&path)
+        {
+            matches.insert(0, path);
+            matches.truncate(14);
+        }
+        matches
+    }
+
+    fn agent_results(&self, cx: &Context<Self>) -> Vec<AgentChoice> {
+        let query = self.picker_input.read(cx).value().to_string();
+        let mut agents = self
+            .available_agents
+            .iter()
+            .filter_map(|agent| {
+                let command = agent.command.join(" ");
+                let rank = score(query.trim(), &agent.name)
+                    .map(|rank| rank + 30)
+                    .or_else(|| score(query.trim(), &command))?;
+                Some((rank, agent.clone()))
+            })
+            .collect::<Vec<_>>();
+        agents.sort_by(|(a_rank, a), (b_rank, b)| {
+            b_rank.cmp(a_rank).then_with(|| a.name.cmp(&b.name))
+        });
+        agents.into_iter().map(|(_, agent)| agent).collect()
+    }
+
+    fn select_folder(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let path = match path.canonicalize() {
+            Ok(path) if path.is_dir() => path,
+            _ => {
+                self.notice = Some("Choose an existing folder".into());
+                cx.notify();
+                return;
+            }
+        };
+        let project_index = if let Some(index) = self
+            .projects
+            .iter()
+            .position(|project| project.path == path)
+        {
+            index
+        } else {
+            self.projects.push(ProjectView {
+                branch: branch(&path),
+                path: path.clone(),
+                agents: Vec::new(),
+            });
+            self.folders.push(path);
+            self.persist();
+            self.projects.len() - 1
+        };
+        self.selected_project = Some(project_index);
+        self.selected = None;
+        self.notice = None;
+        self.open_picker(PickerMode::Agents, window, cx);
+    }
+
+    fn start_agent(
+        &mut self,
+        command: Vec<String>,
+        name: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_index) = self.selected_project else {
+            self.notice = Some("Choose a project first".into());
+            cx.notify();
+            return;
+        };
+        let config = AgentConfig {
+            id: self.next_agent_id,
+            command,
+            archived: false,
+            display_name: name,
+            session_id: None,
+            model: None,
+            context: None,
+            messages: Vec::new(),
+            available_commands: Vec::new(),
+            pending_prompts: Vec::new(),
+            was_working: false,
+            session_has_activity: false,
+        };
+        self.sidebar_order.push(config.id);
+        self.next_agent_id += 1;
+        let agent_index = self.projects[project_index].agents.len();
+        self.projects[project_index]
+            .agents
+            .push(AgentView::new(config));
+        self.selected = Some((project_index, agent_index));
+        self.connect(project_index, agent_index);
+        self.picker = PickerMode::Closed;
+        self.notice = None;
+        self.persist();
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn move_agent(&mut self, dragged: u64, target: u64, cx: &mut Context<Self>) {
+        if move_sidebar_id(&mut self.sidebar_order, dragged, target) {
+            self.persist();
+            cx.notify();
+        }
+    }
+
+    fn set_archived(
+        &mut self,
+        project_index: usize,
+        agent_index: usize,
+        archived: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let agent = &mut self.projects[project_index].agents[agent_index];
+        if agent.config.archived == archived {
+            return;
+        }
+        agent.config.archived = archived;
+        if archived {
+            if self.selected == Some((project_index, agent_index)) {
+                self.selected = self.sidebar_order.iter().find_map(|id| {
+                    self.projects.iter().enumerate().find_map(|(pi, project)| {
+                        project.agents.iter().enumerate().find_map(|(ai, agent)| {
+                            (agent.config.id == *id && !agent.config.archived).then_some((pi, ai))
+                        })
+                    })
+                });
+                self.selected_project = self.selected.map(|(pi, _)| pi);
+            }
+        } else {
+            if self.projects[project_index].agents[agent_index]
+                .connection
+                .is_none()
+            {
+                self.connect(project_index, agent_index);
+            }
+            self.show_archived = false;
+            self.selected = Some((project_index, agent_index));
+            self.selected_project = Some(project_index);
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
+        self.persist();
+        cx.notify();
+    }
+
+    fn confirm_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.picker {
+            PickerMode::Folders => {
+                if let Some(path) = self.folder_results(cx).get(self.picker_selection).cloned() {
+                    self.select_folder(path, window, cx);
+                } else {
+                    self.notice =
+                        Some("No matching folder. Type an existing absolute path.".into());
+                    cx.notify();
+                }
+            }
+            PickerMode::Agents => {
+                if let Some(agent) = self.agent_results(cx).get(self.picker_selection).cloned() {
+                    self.start_agent(agent.command, Some(agent.name), window, cx);
+                } else {
+                    self.start_custom_agent(window, cx);
+                }
+            }
+            PickerMode::Closed => {}
+        }
+    }
+
+    fn start_custom_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.picker_input.read(cx).value().to_string();
+        match shell_words::split(value.trim()) {
+            Ok(command) if !command.is_empty() => self.start_agent(command, None, window, cx),
+            _ => {
+                self.notice = Some("Enter an ACP executable and its arguments".into());
+                cx.notify();
+            }
+        }
+    }
+
+    fn quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_picker(PickerMode::Folders, window, cx);
+    }
+
+    fn picker_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picker == PickerMode::Closed {
+            return;
+        }
+        let count = match self.picker {
+            PickerMode::Folders => self.folder_results(cx).len(),
+            PickerMode::Agents => {
+                self.agent_results(cx).len()
+                    + usize::from(!self.picker_input.read(cx).value().trim().is_empty())
+            }
+            PickerMode::Closed => 0,
+        };
+        match event.keystroke.key.as_str() {
+            "down" if count > 0 => {
+                self.picker_selection = (self.picker_selection + 1) % count;
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "up" if count > 0 => {
+                self.picker_selection = (self.picker_selection + count - 1) % count;
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "escape" => {
+                self.back_from_picker(window, cx);
+                cx.stop_propagation();
+            }
+            _ => {}
+        }
+    }
+
+    fn slash_results(&self, cx: &Context<Self>) -> Vec<SlashCommand> {
+        if self.slash_dismissed || self.picker != PickerMode::Closed {
+            return Vec::new();
+        }
+        let Some((project_index, agent_index)) = self.selected else {
+            return Vec::new();
+        };
+        let draft = self.composer.read(cx).value().to_string();
+        matching_slash_commands(
+            &self.projects[project_index].agents[agent_index]
+                .config
+                .available_commands,
+            &draft,
+        )
+    }
+
+    fn complete_slash_command(
+        &mut self,
+        command: SlashCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = completed_slash_text(&command);
+        let column = value.encode_utf16().count() as u32;
+        self.composer.update(cx, |input, cx| {
+            input.set_value(value, window, cx);
+            input.set_cursor_position(Position::new(0, column), window, cx);
+        });
+        self.slash_selection = 0;
+        self.slash_dismissed = true;
+        cx.notify();
+    }
+
+    fn handle_slash_action(
+        &mut self,
+        action: SlashAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let commands = self.slash_results(cx);
+        if commands.is_empty() {
+            return;
+        }
+        match action {
+            SlashAction::Down => {
+                self.slash_selection = (self.slash_selection + 1) % commands.len();
+            }
+            SlashAction::Up => {
+                self.slash_selection = (self.slash_selection + commands.len() - 1) % commands.len();
+            }
+            SlashAction::Complete => {
+                let index = self.slash_selection.min(commands.len() - 1);
+                self.complete_slash_command(commands[index].clone(), window, cx);
+            }
+            SlashAction::Dismiss => {
+                self.slash_dismissed = true;
+            }
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        if self.dirty {
+            let _ = config::save(&self.config());
+        }
+    }
+}
+
+pub(crate) fn run() {
+    Application::new().with_assets(Assets).run(|cx: &mut App| {
+        gpui_component::init(cx);
+        #[cfg(target_os = "macos")]
+        cx.bind_keys([
+            KeyBinding::new("cmd-p", QuickOpen, None),
+            KeyBinding::new(
+                "ctrl-enter",
+                gpui_component::input::Enter { secondary: true },
+                Some("Input"),
+            ),
+        ]);
+        #[cfg(not(target_os = "macos"))]
+        cx.bind_keys([KeyBinding::new("ctrl-p", QuickOpen, None)]);
+        theme::apply(cx);
+        let bounds = Bounds::centered(None, size(px(1200.), px(760.)), cx);
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |window, cx| {
+                window.set_window_title("Agentaps");
+                let view = cx.new(|cx| Workspace::new(window, cx));
+                cx.new(|cx| Root::new(view, window, cx))
+            },
+        )
+        .expect("Could not open GPUI window");
+        cx.activate(true);
+    });
+}
