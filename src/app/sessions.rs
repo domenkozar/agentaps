@@ -59,7 +59,10 @@ impl Workspace {
         }
         match agent.start_prompt(prompt) {
             Ok(()) => {
-                self.chat_scroll.scroll_to_bottom();
+                self.chat_list.scroll_to(gpui::ListOffset {
+                    item_ix: self.chat_list.item_count(),
+                    offset_in_item: px(0.),
+                });
                 self.dirty = true;
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));

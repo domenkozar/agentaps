@@ -6,9 +6,9 @@ use crate::{config, theme};
 use agent_client_protocol_schema::{ProtocolVersion, v2};
 use gpui::{
     App, Application, Bounds, Context, DragMoveEvent, Entity, Focusable, IntoElement, KeyBinding,
-    KeyDownEvent, MouseButton, Render, ScrollHandle, StatefulInteractiveElement, Subscription,
-    Timer, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, relative, rems, rgb,
-    size,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, Render, StatefulInteractiveElement,
+    Subscription, Timer, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px,
+    relative, rems, rgb, size,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Root,
@@ -110,6 +110,21 @@ impl Render for SidebarResize {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChatRowKind {
+    Empty,
+    Message(usize),
+    Tools(usize, usize),
+    Queued(usize),
+    Permission(usize),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ChatRow {
+    kind: ChatRowKind,
+    signature: u64,
+}
+
 struct Workspace {
     projects: Vec<ProjectView>,
     selected: Option<(usize, usize)>,
@@ -133,7 +148,9 @@ struct Workspace {
     picker_input: Entity<InputState>,
     sidebar_search: Entity<InputState>,
     composer: Entity<InputState>,
-    chat_scroll: ScrollHandle,
+    chat_list: ListState,
+    chat_list_agent: Option<u64>,
+    chat_rows: Vec<ChatRow>,
     dirty: bool,
     last_saved: Instant,
     notice: Option<String>,
@@ -348,7 +365,9 @@ impl Workspace {
             picker_input,
             sidebar_search,
             composer,
-            chat_scroll: ScrollHandle::new(),
+            chat_list: ListState::new(0, ListAlignment::Bottom, px(300.)),
+            chat_list_agent: None,
+            chat_rows: Vec::new(),
             dirty: migrate_config,
             last_saved: Instant::now(),
             notice,

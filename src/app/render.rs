@@ -21,9 +21,6 @@ fn status_badge(agent_id: u64, status: Status) -> impl IntoElement {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.chat_scroll.offset().y + self.chat_scroll.max_offset().height <= px(24.) {
-            self.chat_scroll.scroll_to_bottom();
-        }
         let sidebar = self.render_sidebar(window, cx);
         let divider = div()
             .id("sidebar-divider")
@@ -48,7 +45,8 @@ impl Render for Workspace {
         if self.picker != PickerMode::Closed {
             chat = self.render_picker(chat, cx);
         } else if let Some((project_index, agent_index)) = self.selected {
-            chat = self.render_conversation(chat, project_index, agent_index, window, cx);
+            self.sync_chat_rows(project_index, agent_index);
+            chat = self.render_conversation(chat, project_index, agent_index, cx);
         } else {
             chat = chat.child(
                 div()

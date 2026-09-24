@@ -6,7 +6,6 @@ impl Workspace {
         mut chat: Div,
         project_index: usize,
         agent_index: usize,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let project = &self.projects[project_index];
@@ -80,22 +79,26 @@ impl Workspace {
                     |element| element.child(metadata),
                 ),
         );
-        let entries = self.render_entries(agent, window, cx);
+        let view = cx.entity().clone();
+        let rows = self.chat_rows.clone();
+        let history = gpui::list(self.chat_list.clone(), move |index, window, cx| {
+            view.update(cx, |this, cx| {
+                let agent = &this.projects[project_index].agents[agent_index];
+                this.render_chat_row(agent, rows[index].kind, window, cx)
+                    .into_any_element()
+            })
+        })
+        .w_full()
+        .h_full()
+        .p_4();
         chat = chat.child(
             div()
                 .flex_1()
                 .min_w(px(0.))
                 .min_h(px(0.))
                 .relative()
-                .child(
-                    div()
-                        .id("chat-scroll")
-                        .size_full()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.chat_scroll)
-                        .child(entries),
-                )
-                .vertical_scrollbar(&self.chat_scroll),
+                .child(div().id("chat-scroll").size_full().child(history))
+                .vertical_scrollbar(&self.chat_list),
         );
         if agent.active_work {
             chat = chat.child(
