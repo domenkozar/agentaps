@@ -110,6 +110,8 @@ fn v2_prompt_acknowledgement_is_not_completion() {
     );
     assert_eq!(agent.status, Status::Done);
     assert!(!agent.active_work);
+    agent.mark_viewed();
+    assert_eq!(agent.status, Status::Idle);
 }
 
 #[test]

@@ -123,6 +123,12 @@ pub(super) fn selected_model(config_options: &Value) -> Option<String> {
 }
 
 impl AgentView {
+    pub(super) fn mark_viewed(&mut self) {
+        if self.status == Status::Done {
+            self.status = Status::Idle;
+        }
+    }
+
     pub(super) fn new(config: AgentConfig) -> Self {
         let name = config
             .display_name

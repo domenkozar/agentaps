@@ -317,6 +317,17 @@ fn completed_slash_text(command: &SlashCommand) -> String {
 }
 
 impl Workspace {
+    fn set_view(&mut self, view: WorkspaceView) {
+        self.view = view;
+        self.mark_displayed_agent_viewed();
+    }
+
+    fn mark_displayed_agent_viewed(&mut self) {
+        if let Some(session) = self.view.displayed_session() {
+            self.projects[session.project_index].agents[session.agent_index].mark_viewed();
+        }
+    }
+
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let picker_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search folders by name or path…"));
@@ -483,11 +494,11 @@ impl Workspace {
             }
         }
         if let Some(session) = selected {
-            this.view = WorkspaceView::Conversation(session);
+            this.set_view(WorkspaceView::Conversation(session));
             this.composer
                 .update(cx, |input, cx| input.focus(window, cx));
         } else {
-            this.view = if this
+            let view = if this
                 .projects
                 .iter()
                 .any(|project| project.agents.iter().any(|agent| agent.config.archived))
@@ -504,6 +515,7 @@ impl Workspace {
                     return_to: None,
                 }
             };
+            this.set_view(view);
             if matches!(this.view, WorkspaceView::NewSession { .. }) {
                 this.picker_input
                     .update(cx, |input, cx| input.focus(window, cx));
@@ -567,7 +579,7 @@ impl Workspace {
     }
 
     fn open_picker(&mut self, step: PickerStep, window: &mut Window, cx: &mut Context<Self>) {
-        self.view = self.view.open_picker(step);
+        self.set_view(self.view.open_picker(step));
         self.picker_selection = 0;
         self.picker_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -594,7 +606,7 @@ impl Workspace {
                 step: PickerStep::Folders,
                 return_to: Some(session),
             } => {
-                self.view = WorkspaceView::Conversation(session);
+                self.set_view(WorkspaceView::Conversation(session));
                 self.composer
                     .update(cx, |input, cx| input.focus(window, cx));
                 cx.notify();
@@ -700,10 +712,10 @@ impl Workspace {
         self.projects[project_index]
             .agents
             .push(AgentView::new(config));
-        self.view = WorkspaceView::Conversation(SessionLocation {
+        self.set_view(WorkspaceView::Conversation(SessionLocation {
             project_index,
             agent_index,
-        });
+        }));
         self.connect(project_index, agent_index);
         self.notice = None;
         self.persist();
@@ -750,7 +762,7 @@ impl Workspace {
                         })
                     })
                 });
-                self.view = self.view.session_archived(location, next);
+                self.set_view(self.view.session_archived(location, next));
             }
         } else {
             if self.projects[project_index].agents[agent_index]
@@ -759,10 +771,10 @@ impl Workspace {
             {
                 self.connect(project_index, agent_index);
             }
-            self.view = WorkspaceView::Conversation(SessionLocation {
+            self.set_view(WorkspaceView::Conversation(SessionLocation {
                 project_index,
                 agent_index,
-            });
+            }));
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
         }

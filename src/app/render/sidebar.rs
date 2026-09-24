@@ -81,10 +81,10 @@ impl Workspace {
                         this.set_archived(project_index, agent_index, false, window, cx);
                         return;
                     }
-                    this.view = WorkspaceView::Conversation(SessionLocation {
+                    this.set_view(WorkspaceView::Conversation(SessionLocation {
                         project_index,
                         agent_index,
-                    });
+                    }));
                     this.composer
                         .update(cx, |input, cx| input.focus(window, cx));
                     cx.notify();
@@ -307,7 +307,7 @@ impl Workspace {
                                 Tooltip::new(archive_tooltip).build(window, cx)
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.view = this.view.toggle_archive();
+                                this.set_view(this.view.toggle_archive());
                                 if this.view.displayed_session().is_some() {
                                     this.composer
                                         .update(cx, |input, cx| input.focus(window, cx));

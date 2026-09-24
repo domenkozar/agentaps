@@ -149,6 +149,7 @@ impl Workspace {
                 }
             }
         }
+        self.mark_displayed_agent_viewed();
         for project in &mut self.projects {
             for agent in &mut project.agents {
                 changed |= agent.start_next_queued_prompt();
