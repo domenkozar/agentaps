@@ -1,0 +1,8 @@
+/target
+/.devenv
+/.devenv.flake.nix
+/.direnv
+/result
+/vendor/gpui-component/.cargo-ok
+/vendor/gpui-component/.cargo_vcs_info.json
+/vendor/gpui-component/Cargo.lock
