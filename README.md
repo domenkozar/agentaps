@@ -1,27 +1,35 @@
 # Agentaps
 
-A GPUI desktop client for Agent Client Protocol (ACP) agents. Each left sidebar row shows one agent's project folder and current git branch, with a colored status dot whose tooltip shows connecting, idle, working, done, or error. Drag rows to rearrange them and drag the divider to resize the sidebar; both are saved. Search sessions by project name, path, branch, or agent in the field above the list. The bottom row has Archive and New controls; New opens a folder, and Archive switches to saved sessions, which can be restored by clicking them. Hover over a session to reveal its archive icon. The right pane shows the selected agent's conversation, tool activity, and permission requests. Consecutive tool calls appear as compact activity groups with searches and reads summarized inline. Approval reviews are condensed into a status line. Click an activity heading to collapse it or an action to inspect its full command and output. A small indicator appears while the agent responds.
+Agentaps is a Rust and GPUI desktop client for agents that speak the Agent Client Protocol (ACP). Open a project folder, choose an agent, and chat with it while keeping its git branch and status in view.
 
 ## Run
+
+From the repository root, with `devenv` installed:
 
 ```sh
 devenv shell cargo run --release
 ```
 
-The included `devenv.nix` provides Rust, the native libraries needed by GPUI, and Node for optional ACP adapters. Inside an active `devenv shell`, run `cargo run --release` directly. The optimized build keeps the GPUI chat interface responsive.
+The development environment provides Rust, the native libraries GPUI needs, and Node for optional ACP adapters.
 
-The first screen is a folder picker. Press **Ctrl+P** on Linux and Windows or **Cmd+P** on macOS to open it from anywhere. Search folders by name or path with fuzzy matching, use the arrow keys to choose a result, and press Enter. The picker scans your home directory and current working directory in the background, to a depth of five folders. Hidden and generated directories are skipped. You can also type an existing absolute path directly.
+## Use
 
-After choosing a folder, pick a detected ACP agent. The app checks `PATH` for installed ACP adapters and for Gemini CLI and OpenCode's native ACP commands. If Codex or Claude is installed alongside `npx`, the picker offers the respective ACP adapter through `npx`; this downloads the adapter on first launch. Enter a custom ACP command if your agent is not listed. Commands are parsed as arguments, without a shell, and launched with the project as their working directory.
+1. Click **New** or press **Ctrl+P** (**Cmd+P** on macOS) to open the folder picker.
+2. Search for a folder by name or path, or enter an absolute path. Press **Enter** to select it.
+3. Choose a detected agent, or enter a custom ACP command. Agentaps starts it in the selected folder.
 
-On NixOS, the Claude adapter is pointed at an installed `claude` executable. This avoids the adapter's bundled generic Linux executable, which NixOS cannot launch by default. Set `CLAUDE_CODE_EXECUTABLE` yourself to override that choice.
+Each sidebar row shows a project, its git branch, and a status dot. Hover over the dot for the state. Drag rows to reorder them or drag the divider to resize the sidebar. Hover over a row to reveal its archive icon; **Archive** at the bottom shows archived sessions.
 
-Type a message and press **Enter** to send. Press **Ctrl+Enter** to add a newline. Type `/` to see commands advertised by the selected agent, then use the arrow keys and **Tab** or **Enter** to complete one. The conversation has a scrollbar when it overflows. The square Stop icon beside the working indicator sends ACP `session/cancel` for the active turn. You can keep sending messages while the agent works; they appear as queued messages and are sent in order after the current turn ends. Queued messages are saved across app restarts. Permission choices are shown in the chat and sent back to the agent. The active agent header shows its model and context usage when the agent reports them through ACP session configuration and usage updates.
+In chat, **Enter** sends and **Ctrl+Enter** inserts a newline. Type `/` for commands advertised by the current agent, use **Up/Down** to choose one, and press **Tab** or **Enter** to complete it. While the agent works, the square Stop icon cancels the current turn. You can send more messages during a turn; Agentaps queues them and sends them in order.
 
-Opening an agent focuses the chat composer. Conversation text is selectable; drag over text and press **Ctrl+C** (or **Cmd+C** on macOS) to copy it.
+## Agents
 
-Projects, agent commands, session IDs, model and context details, and visible chat and tool activity are saved in `$XDG_CONFIG_HOME/agentaps/config.json`, or `~/.config/agentaps/config.json` when `XDG_CONFIG_HOME` is unset. On first launch after the rename, Agentaps loads the old `devenv-terminal/config.json` if the new config does not exist, then saves it to the new location. The old file is retained. The file is written atomically with private permissions on Unix. When the app opens, it reconnects each saved agent and resumes its session when the agent supports it. ACP v2 uses `session/resume`; ACP v1 uses `session/resume` when advertised, or `session/load` otherwise. If an agent cannot restore a session, the app starts a new one and keeps the saved activity visible with a notice. An in-progress turn may be interrupted when the app closes.
+Agentaps requests ACP v2 and also accepts v1 agents. It detects installed Codex and Claude ACP adapters, Gemini CLI's `--acp` mode, and OpenCode's `acp` mode. If a Codex or Claude CLI is installed without an adapter, Agentaps can offer one through `npx` when available. The first launch may download that adapter. You can also enter any ACP command directly.
 
-The client requests draft ACP v2 and uses the official Rust v2 schema for initialization, prompt acknowledgements, and session updates. If an agent negotiates v1, the client uses its existing v1 conversation path. In v2, a prompt acknowledgement confirms message insertion; the sidebar changes to **done** only after the agent sends an idle `state_update`.
+On NixOS, Agentaps points `claude-agent-acp` at an installed `claude` executable. Set `CLAUDE_CODE_EXECUTABLE` to override this.
 
-The client does not advertise optional client file system or terminal capabilities, so agents that require those client services will need a future integration. Agent authentication is also outside this initial version.
+## Sessions
+
+Agentaps saves projects, agents, chat history, and queued messages in `$XDG_CONFIG_HOME/agentaps/config.json`, or `~/.config/agentaps/config.json` if `XDG_CONFIG_HOME` is unset. On launch it reconnects saved agents and resumes their sessions when supported. If an agent cannot restore a session, the saved chat remains visible and a new session starts. An active turn may be interrupted when the app closes.
+
+Agentaps does not yet provide ACP client file system or terminal methods, or a built-in authentication flow. Agents that require those client features may not work.
