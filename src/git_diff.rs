@@ -274,6 +274,14 @@ mod tests {
     fn replacement_has_one_split_row_and_two_unified_rows() {
         let hunks = text_hunks("first\nbefore\nlast\n", "first\nafter\nlast\n");
         assert_eq!(hunks.len(), 1);
+        assert_eq!(
+            crate::diff_view::stats(&File {
+                path: "changed.txt".into(),
+                hunks: hunks.clone(),
+                note: None,
+            }),
+            (1, 1)
+        );
         assert!(hunks[0].lines.iter().any(|line| {
             line.old.as_ref().is_some_and(|side| side.text == "before")
                 && line.new.as_ref().is_some_and(|side| side.text == "after")

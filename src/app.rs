@@ -43,7 +43,16 @@ mod tool_activity;
 
 use self::{agent::*, elicitation::*, tool_activity::*};
 
-type DiffLoadResult = Result<(Vec<DiffFile>, DiffPresentation, Arc<Vec<DiffRow>>), String>;
+type DiffLoadResult = Result<
+    (
+        Vec<DiffFile>,
+        Vec<(usize, usize)>,
+        DiffPresentation,
+        Option<String>,
+        Arc<Vec<DiffRow>>,
+    ),
+    String,
+>;
 
 fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
     let Some(from) = order.iter().position(|id| *id == dragged) else {
@@ -303,6 +312,7 @@ struct Workspace {
     chat_list_agent: Option<u64>,
     chat_rows: Vec<ChatRow>,
     diff_visible: bool,
+    diff_selected_file: Option<String>,
     diff_presentation: DiffPresentation,
     diff_rows: Arc<Vec<DiffRow>>,
     diff_list: ListState,
@@ -319,10 +329,22 @@ struct Workspace {
     diff_loading: bool,
     diff_error: Option<String>,
     diff_files: Vec<DiffFile>,
+    diff_file_stats: Vec<(usize, usize)>,
     dirty: bool,
     last_saved: Instant,
     notice: Option<String>,
     _subscriptions: Vec<Subscription>,
+}
+
+fn diff_rows_for_file(
+    files: &[DiffFile],
+    path: Option<&str>,
+    presentation: DiffPresentation,
+) -> Vec<DiffRow> {
+    path.and_then(|path| files.iter().find(|file| file.path == path))
+        .map_or_else(Vec::new, |file| {
+            crate::diff_view::flatten(std::slice::from_ref(file), presentation)
+        })
 }
 
 fn branch(path: &Path) -> String {
@@ -425,6 +447,11 @@ impl Workspace {
 
     fn open_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
         self.diff_visible = true;
+        self.diff_selected_file = None;
+        self.diff_files.clear();
+        self.diff_file_stats.clear();
+        self.diff_rows = Arc::new(Vec::new());
+        self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
         self.diff_watch_generation += 1;
         let path = &self.projects[project_index].path;
         self.diff_watcher =
@@ -441,6 +468,7 @@ impl Workspace {
 
     fn close_diff(&mut self) {
         self.diff_visible = false;
+        self.diff_selected_file = None;
         self.diff_request_id += 1;
         self.diff_loading = false;
         self.diff_watcher = None;
@@ -455,13 +483,19 @@ impl Workspace {
         let request_id = self.diff_request_id;
         let path = self.projects[project_index].path.clone();
         let presentation = self.diff_presentation;
+        let selected_file = self.diff_selected_file.clone();
         let tx = self.diff_tx.clone();
         self.diff_loading = true;
         self.diff_error = None;
         std::thread::spawn(move || {
             let result = crate::git_diff::load(&path).map(|files| {
-                let rows = Arc::new(crate::diff_view::flatten(&files, presentation));
-                (files, presentation, rows)
+                let stats = files.iter().map(crate::diff_view::stats).collect();
+                let rows = Arc::new(diff_rows_for_file(
+                    &files,
+                    selected_file.as_deref(),
+                    presentation,
+                ));
+                (files, stats, presentation, selected_file, rows)
             });
             let _ = tx.send((request_id, result));
         });
@@ -474,9 +508,23 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.diff_presentation = presentation;
-        self.diff_rows = Arc::new(crate::diff_view::flatten(&self.diff_files, presentation));
+        self.diff_rows = Arc::new(diff_rows_for_file(
+            &self.diff_files,
+            self.diff_selected_file.as_deref(),
+            presentation,
+        ));
         self.diff_list = ListState::new(self.diff_rows.len(), ListAlignment::Top, px(28.));
         cx.notify();
+    }
+
+    fn select_diff_file(&mut self, path: String, cx: &mut Context<Self>) {
+        self.diff_selected_file = Some(path);
+        self.set_diff_presentation(self.diff_presentation, cx);
+    }
+
+    fn show_diff_summary(&mut self, cx: &mut Context<Self>) {
+        self.diff_selected_file = None;
+        self.set_diff_presentation(self.diff_presentation, cx);
     }
 
     fn mark_displayed_agent_viewed(&mut self) {
@@ -656,6 +704,7 @@ impl Workspace {
             chat_list_agent: None,
             chat_rows: Vec::new(),
             diff_visible: false,
+            diff_selected_file: None,
             diff_presentation: crate::diff_view::Presentation::Unified,
             diff_rows: Arc::new(Vec::new()),
             diff_list: ListState::new(0, ListAlignment::Top, px(28.)),
@@ -672,6 +721,7 @@ impl Workspace {
             diff_loading: false,
             diff_error: None,
             diff_files: Vec::new(),
+            diff_file_stats: Vec::new(),
             dirty: migrate_config,
             last_saved: Instant::now(),
             notice,

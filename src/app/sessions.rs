@@ -253,17 +253,31 @@ impl Workspace {
             }
             self.diff_loading = false;
             match result {
-                Ok((files, presentation, rows)) => {
+                Ok((files, stats, presentation, selected_file, rows)) => {
                     let scroll_top = self.diff_list.logical_scroll_top();
-                    self.diff_rows = if presentation == self.diff_presentation {
+                    if self
+                        .diff_selected_file
+                        .as_ref()
+                        .is_some_and(|selected| !files.iter().any(|file| &file.path == selected))
+                    {
+                        self.diff_selected_file = None;
+                    }
+                    self.diff_rows = if presentation == self.diff_presentation
+                        && selected_file == self.diff_selected_file
+                    {
                         rows
                     } else {
-                        Arc::new(crate::diff_view::flatten(&files, self.diff_presentation))
+                        Arc::new(diff_rows_for_file(
+                            &files,
+                            self.diff_selected_file.as_deref(),
+                            self.diff_presentation,
+                        ))
                     };
                     self.diff_list =
                         ListState::new(self.diff_rows.len(), ListAlignment::Top, px(28.));
                     self.diff_list.scroll_to(scroll_top);
                     self.diff_files = files;
+                    self.diff_file_stats = stats;
                     self.diff_error = None;
                 }
                 Err(error) => self.diff_error = Some(error),

@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 const ADDED_BG: u32 = 0x19382e;
 const REMOVED_BG: u32 = 0x422a31;
-const ADDED_TEXT: u32 = 0x9cdbb5;
-const REMOVED_TEXT: u32 = 0xf0aaaa;
+pub(crate) const ADDED_TEXT: u32 = 0x9cdbb5;
+pub(crate) const REMOVED_TEXT: u32 = 0xf0aaaa;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presentation {
@@ -49,6 +49,28 @@ pub struct File {
     pub path: String,
     pub hunks: Vec<Hunk>,
     pub note: Option<String>,
+}
+
+pub fn stats(file: &File) -> (usize, usize) {
+    let mut added = 0;
+    let mut removed = 0;
+    for line in file.hunks.iter().flat_map(|hunk| &hunk.lines) {
+        if line
+            .new
+            .as_ref()
+            .is_some_and(|side| side.mark == Mark::Added)
+        {
+            added += 1;
+        }
+        if line
+            .old
+            .as_ref()
+            .is_some_and(|side| side.mark == Mark::Removed)
+        {
+            removed += 1;
+        }
+    }
+    (added, removed)
 }
 
 #[derive(Clone)]

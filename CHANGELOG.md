@@ -4,6 +4,10 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Diff review opens with a file summary and lets you inspect one file at a time.
+
 ### Fixed
 
 - Branch labels work without the Git executable installed.
