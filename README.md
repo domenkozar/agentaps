@@ -16,6 +16,12 @@ Agentaps is a Rust and GPUI desktop client for agents that speak the Agent Clien
 
 ## Run
 
+Install from crates.io where GPUI's native build dependencies are available:
+
+```sh
+cargo install agentaps
+```
+
 From the repository root, with `devenv` installed:
 
 ```sh
