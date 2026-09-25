@@ -14,6 +14,10 @@ Notable changes to Agentaps are recorded here.
 - Rank session search results by relevance and switch to the selected session as the search changes or Up and Down are pressed.
 - Stop a working agent with Escape, the same as clicking Stop.
 
+### Fixed
+
+- Escape reliably stops a working agent while the chat input is focused.
+
 ### Documentation
 
 - Added this changelog and instructions for keeping it up to date.

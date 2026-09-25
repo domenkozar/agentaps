@@ -119,9 +119,9 @@ impl Render for Workspace {
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
                 this.handle_slash_action(SlashAction::Complete, window, cx)
             }))
-            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
-                this.handle_slash_action(SlashAction::Dismiss, window, cx)
-            }))
+            .capture_action(
+                cx.listener(|this, _: &Escape, window, cx| this.handle_escape(window, cx)),
+            )
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<SidebarResize>, window, cx| {
                     let viewport_width = f32::from(window.viewport_size().width);

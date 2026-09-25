@@ -1035,20 +1035,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.key == "escape"
-            && !matches!(self.view, WorkspaceView::NewSession { .. })
-            && let Some(SessionLocation {
-                project_index,
-                agent_index,
-            }) = self.view.displayed_session()
-        {
-            let agent = &self.projects[project_index].agents[agent_index];
-            if agent.active_work && !agent.cancel_requested {
-                self.cancel_prompt(cx);
-                cx.stop_propagation();
-                return;
-            }
-        }
         if self
             .sidebar_search
             .read(cx)
@@ -1175,6 +1161,23 @@ impl Workspace {
         }
         cx.stop_propagation();
         cx.notify();
+    }
+
+    fn handle_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.view, WorkspaceView::NewSession { .. })
+            && let Some(SessionLocation {
+                project_index,
+                agent_index,
+            }) = self.view.displayed_session()
+        {
+            let agent = &self.projects[project_index].agents[agent_index];
+            if agent.active_work && !agent.cancel_requested {
+                self.cancel_prompt(cx);
+                cx.stop_propagation();
+                return;
+            }
+        }
+        self.handle_slash_action(SlashAction::Dismiss, window, cx);
     }
 
     fn handle_prompt_recall(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
