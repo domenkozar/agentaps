@@ -1,5 +1,7 @@
 # Agentaps
 
+Your coding agents, wherever you work.
+
 Agentaps is a Rust and GPUI desktop client for agents that speak the Agent Client Protocol (ACP).
 
 ![Agentaps showing a Codex conversation and project sessions](docs/images/agentaps.png)

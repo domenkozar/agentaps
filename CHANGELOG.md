@@ -4,6 +4,10 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+### Documentation
+
+- Added a tagline that captures Agentaps' direction across work environments.
+
 ### Added
 
 - Search fields show a clear button while typing, and Escape clears the current search.
