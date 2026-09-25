@@ -26,7 +26,6 @@ use serde_json::{Value, json};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Arc,
         mpsc::{self, Receiver, Sender},
@@ -327,17 +326,12 @@ struct Workspace {
 }
 
 fn branch(path: &Path) -> String {
-    for args in [
-        vec!["symbolic-ref", "--quiet", "--short", "HEAD"],
-        vec!["rev-parse", "--short", "HEAD"],
-    ] {
-        if let Ok(output) = Command::new("git").arg("-C").arg(path).args(args).output()
-            && output.status.success()
-        {
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            if !text.is_empty() {
-                return text;
-            }
+    if let Ok(repo) = gix::discover(path) {
+        if let Ok(Some(name)) = repo.head_name() {
+            return name.shorten().to_string();
+        }
+        if let Ok(id) = repo.head_id() {
+            return id.shorten_or_id().to_string();
         }
     }
     "no git branch".into()

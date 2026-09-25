@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn branch_labels_unborn_and_detached_heads_without_git() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("agentaps-branch-{}-{stamp}", std::process::id()));
+    let repo = gix::init(&path).unwrap();
+    std::fs::write(repo.git_dir().join("HEAD"), "ref: refs/heads/topic\n").unwrap();
+    assert_eq!(branch(&path), "topic");
+
+    let id = repo.write_blob(b"detached head fixture").unwrap();
+    std::fs::write(repo.git_dir().join("HEAD"), format!("{id}\n")).unwrap();
+    let detached = branch(&path);
+    assert!(id.to_string().starts_with(&detached));
+    assert!(detached.len() < id.to_string().len());
+
+    drop(repo);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
 fn session_search_prefers_direct_name_matches() {
     let direct = session_search_score("agentaps", Path::new("/dev/agentaps"), "main", "Codex");
     let path_only = session_search_score(

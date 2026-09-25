@@ -4,6 +4,10 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Branch labels work without the Git executable installed.
+
 ## [0.2.0] - 2026-09-25
 
 ### Changed
