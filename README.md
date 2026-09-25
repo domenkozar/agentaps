@@ -36,3 +36,7 @@ The development environment provides Rust, the native libraries GPUI needs, and 
 - On NixOS, Agentaps points `claude-agent-acp` at an installed `claude` executable. Set `CLAUDE_CODE_EXECUTABLE` to override this.
 - Session data is stored in `$XDG_CONFIG_HOME/agentaps/config.json`, or `~/.config/agentaps/config.json` if `XDG_CONFIG_HOME` is unset. Closing the app may interrupt an active turn.
 - URL-based elicitation, ACP client file system and terminal methods, and a built-in authentication flow are not yet supported. Agents that require those client features may not work.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
