@@ -76,6 +76,7 @@ pub(super) struct AgentView {
     pub(super) next_request_id: u64,
     pub(super) messages: Vec<ChatEntry>,
     pub(super) permissions: Vec<Permission>,
+    pub(super) elicitations: Vec<Elicitation>,
     pub(super) connection: Option<Connection>,
 }
 
@@ -193,6 +194,7 @@ impl AgentView {
             next_request_id: 3,
             messages,
             permissions: Vec::new(),
+            elicitations: Vec::new(),
             connection: None,
         }
     }

@@ -42,6 +42,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "regex",
  "serde",
  "serde_json",
  "shell-words",

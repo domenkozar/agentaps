@@ -1,5 +1,19 @@
 use super::*;
 
+fn initialize_params() -> Value {
+    let initialize = v2::InitializeRequest::new(
+        ProtocolVersion::V2,
+        v2::Implementation::new("agentaps", env!("CARGO_PKG_VERSION")).title("Agentaps"),
+    )
+    .capabilities(v2::ClientCapabilities::new().elicitation(
+        v2::ElicitationCapabilities::new().form(v2::ElicitationFormCapabilities::new()),
+    ));
+    let mut params = json!(initialize);
+    // A v1 agent reads this field when it accepts our v2 version offer.
+    params["clientCapabilities"] = json!({"elicitation":{"form":{}}});
+    params
+}
+
 impl Workspace {
     pub(super) fn reset_context(
         &mut self,
@@ -45,13 +59,8 @@ impl Workspace {
         ) {
             Ok(connection) => {
                 agent.connection = Some(connection);
-                let initialize = v2::InitializeRequest::new(
-                    ProtocolVersion::V2,
-                    v2::Implementation::new("agentaps", env!("CARGO_PKG_VERSION"))
-                        .title("Agentaps"),
-                );
                 if let Err(error) = agent
-                    .send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":initialize}))
+                    .send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":initialize_params()}))
                 {
                     agent.status = Status::Error;
                     agent.log(Role::System, error);
@@ -132,6 +141,9 @@ impl Workspace {
             for permission in agent.permissions.drain(..) {
                 let _ = agent.connection.as_ref().map(|connection| connection.send(json!({"jsonrpc":"2.0","id":permission.request_id,"result":{"outcome":{"outcome":"cancelled"}}})));
             }
+            for elicitation in agent.elicitations.drain(..) {
+                let _ = agent.connection.as_ref().map(|connection| connection.send(json!({"jsonrpc":"2.0","id":elicitation.request_id,"result":{"action":"cancel"}})));
+            }
             agent.awaiting_response = false;
             cx.notify();
         }
@@ -164,16 +176,85 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn poll_events(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn answer_elicitation(
+        &mut self,
+        question_index: usize,
+        action: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(location) = self.view.displayed_session() else {
+            return;
+        };
+        let agent = &mut self.projects[location.project_index].agents[location.agent_index];
+        let Some(question) = agent.elicitations.get(question_index) else {
+            return;
+        };
+        let result = if action == "accept" {
+            match question.content(cx) {
+                Ok(content) => json!({"action":"accept","content":content}),
+                Err(error) => {
+                    agent.elicitations[question_index].error = Some(error);
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            json!({"action":action})
+        };
+        let question = agent.elicitations.remove(question_index);
+        if let Err(error) =
+            agent.send(json!({"jsonrpc":"2.0","id":question.request_id,"result":result}))
+        {
+            agent.log(Role::System, format!("Could not answer question: {error}"));
+            agent.status = Status::Error;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn select_elicitation_option(
+        &mut self,
+        question_index: usize,
+        field_index: usize,
+        option_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(location) = self.view.displayed_session() else {
+            return;
+        };
+        let Some(field) = self.projects[location.project_index].agents[location.agent_index]
+            .elicitations
+            .get_mut(question_index)
+            .and_then(|question| question.fields.get_mut(field_index))
+        else {
+            return;
+        };
+        match &mut field.kind {
+            ElicitationFieldKind::Select { selected, .. } => *selected = Some(option_index),
+            ElicitationFieldKind::MultiSelect { selected, .. } => {
+                if !selected.insert(option_index) {
+                    selected.remove(&option_index);
+                }
+            }
+            ElicitationFieldKind::Boolean(value) => *value = Some(option_index == 1),
+            ElicitationFieldKind::Input(_) => return,
+        }
+        cx.notify();
+    }
+
+    pub(super) fn poll_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
         while let Ok(event) = self.events_rx.try_recv() {
             changed = true;
             match event {
-                Event::Message { agent_id, value } => self.handle_message(agent_id, value),
+                Event::Message { agent_id, value } => {
+                    self.handle_message(agent_id, value, window, cx)
+                }
                 Event::Disconnected { agent_id, reason } => {
                     if let Some((agent, _)) = self.agent_mut(agent_id) {
                         agent.awaiting_response = false;
                         agent.cancel_requested = false;
+                        agent.elicitations.clear();
+                        agent.permissions.clear();
                         if agent.status != Status::Error {
                             agent.status = Status::Error;
                             agent.log(Role::System, reason);
@@ -243,13 +324,30 @@ impl Workspace {
         })
     }
 
-    pub(super) fn handle_message(&mut self, agent_id: u64, value: Value) {
+    pub(super) fn handle_message(
+        &mut self,
+        agent_id: u64,
+        value: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((agent, path)) = self.agent_mut(agent_id) else {
             return;
         };
         if let Some(method) = value.get("method").and_then(Value::as_str) {
             match method {
                 "session/update" => Self::handle_update(agent, &value),
+                "$/cancel_request" => {
+                    let request_id = &value["params"]["requestId"];
+                    if let Some(index) = agent
+                        .elicitations
+                        .iter()
+                        .position(|question| question.request_id == *request_id)
+                    {
+                        agent.elicitations.remove(index);
+                        let _ = agent.send(json!({"jsonrpc":"2.0","id":request_id,"error":{"code":-32800,"message":"Request cancelled"}}));
+                    }
+                }
                 "session/request_permission" => {
                     let Some(request_id) = value.get("id").cloned() else {
                         return;
@@ -289,6 +387,22 @@ impl Workspace {
                             description,
                             options,
                         });
+                    }
+                }
+                "elicitation/create" => {
+                    let Some(request_id) = value.get("id").cloned() else {
+                        return;
+                    };
+                    let params = &value["params"];
+                    if params["sessionId"].as_str() != agent.session_id.as_deref() {
+                        let _ = agent.send(json!({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"Unknown session"}}));
+                        return;
+                    }
+                    match Elicitation::new(request_id.clone(), params, window, cx) {
+                        Ok(question) => agent.elicitations.push(question),
+                        Err(message) => {
+                            let _ = agent.send(json!({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":message}}));
+                        }
                     }
                 }
                 _ => {
@@ -554,5 +668,20 @@ impl Workspace {
         if changed {
             cx.notify();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertises_form_questions_to_v1_and_v2_agents() {
+        let params = initialize_params();
+        let v2: v2::InitializeRequest = serde_json::from_value(params.clone()).unwrap();
+        assert!(v2.capabilities.elicitation.unwrap().supports_form());
+        let v1: agent_client_protocol_schema::v1::InitializeRequest =
+            serde_json::from_value(params).unwrap();
+        assert!(v1.client_capabilities.elicitation.unwrap().supports_form());
     }
 }

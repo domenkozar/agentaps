@@ -30,13 +30,14 @@ use std::{
 };
 
 mod agent;
+mod elicitation;
 mod render;
 mod sessions;
 #[cfg(test)]
 mod tests;
 mod tool_activity;
 
-use self::{agent::*, tool_activity::*};
+use self::{agent::*, elicitation::*, tool_activity::*};
 
 fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
     let Some(from) = order.iter().position(|id| *id == dragged) else {
@@ -195,6 +196,7 @@ enum ChatRowKind {
     Tools(usize, usize),
     Queued(usize),
     Permission(usize),
+    Elicitation(usize),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -521,13 +523,13 @@ impl Workspace {
                     .update(cx, |input, cx| input.focus(window, cx));
             }
         }
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let mut ticks = 0u32;
             loop {
                 Timer::after(Duration::from_millis(100)).await;
                 if this
-                    .update(cx, |this, cx| {
-                        this.poll_events(cx);
+                    .update_in(cx, |this, window, cx| {
+                        this.poll_events(window, cx);
                         if let Ok(mut folders) = this.folders_rx.try_recv() {
                             folders
                                 .extend(this.projects.iter().map(|project| project.path.clone()));

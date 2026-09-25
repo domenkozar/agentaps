@@ -103,7 +103,7 @@ impl Workspace {
                             this.move_agent(drag.id, agent_id, cx)
                         }))
                 })
-                .child(status_badge(agent_id, agent.status))
+                .child(status_badge(agent))
                 .child(
                     div()
                         .flex_shrink_0()
@@ -123,6 +123,18 @@ impl Workspace {
                         .text_color(rgb(MUTED))
                         .child(project.branch.clone()),
                 )
+                .when(!agent.elicitations.is_empty(), |row| {
+                    row.child(
+                        div()
+                            .flex_shrink_0()
+                            .rounded_sm()
+                            .bg(rgb(SURFACE))
+                            .px_1()
+                            .text_xs()
+                            .text_color(rgb(STATUS_QUESTION))
+                            .child(format!("{} ?", agent.elicitations.len())),
+                    )
+                })
                 .child(
                     div()
                         .id(("archive-action", agent_id))

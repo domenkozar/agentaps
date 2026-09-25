@@ -76,6 +76,28 @@ fn chat_rows(
             signature: hasher.finish(),
         });
     }
+    for (index, question) in agent.elicitations.iter().enumerate() {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text_signature(&question.message, &mut hasher);
+        for field in &question.fields {
+            text_signature(&field.title, &mut hasher);
+            match &field.kind {
+                ElicitationFieldKind::Select { selected, .. } => selected.hash(&mut hasher),
+                ElicitationFieldKind::MultiSelect { selected, .. } => {
+                    let mut selected = selected.iter().collect::<Vec<_>>();
+                    selected.sort();
+                    selected.hash(&mut hasher);
+                }
+                ElicitationFieldKind::Boolean(value) => value.hash(&mut hasher),
+                ElicitationFieldKind::Input(_) => {}
+            }
+        }
+        question.error.hash(&mut hasher);
+        rows.push(ChatRow {
+            kind: ChatRowKind::Elicitation(index),
+            signature: hasher.finish(),
+        });
+    }
 
     rows
 }
@@ -161,6 +183,7 @@ impl Workspace {
                 )
             }
             ChatRowKind::Permission(index) => self.render_permission(agent, index, cx),
+            ChatRowKind::Elicitation(index) => self.render_elicitation(agent, index, cx),
         };
         div().w_full().min_w(px(0.)).pb_2().child(content)
     }
@@ -313,6 +336,212 @@ impl Workspace {
                 )
             })
             .child(choices)
+    }
+
+    fn render_elicitation(
+        &self,
+        agent: &AgentView,
+        question_index: usize,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let question = &agent.elicitations[question_index];
+        let mut fields = div().flex().flex_col().gap_3().mt_3();
+        for (field_index, field) in question.fields.iter().enumerate() {
+            let mut row =
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_sm().text_color(rgb(TEXT)).child(format!(
+                        "{}{}",
+                        field.title,
+                        if field.required { " *" } else { "" }
+                    )));
+            if let Some(description) = &field.description {
+                row = row.child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child(description.clone()),
+                );
+            }
+            match &field.kind {
+                ElicitationFieldKind::Input(input) => {
+                    row = row.child(
+                        div()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(BORDER))
+                            .child(Input::new(input)),
+                    );
+                }
+                ElicitationFieldKind::Select { options, selected } => {
+                    row = row.child(self.render_elicitation_options(
+                        question_index,
+                        field_index,
+                        options,
+                        |index| *selected == Some(index),
+                        cx,
+                    ));
+                }
+                ElicitationFieldKind::MultiSelect { options, selected } => {
+                    row = row.child(self.render_elicitation_options(
+                        question_index,
+                        field_index,
+                        options,
+                        |index| selected.contains(&index),
+                        cx,
+                    ));
+                }
+                ElicitationFieldKind::Boolean(value) => {
+                    let options = [("false".into(), "No".into()), ("true".into(), "Yes".into())];
+                    row = row.child(self.render_elicitation_options(
+                        question_index,
+                        field_index,
+                        &options,
+                        |index| *value == Some(index == 1),
+                        cx,
+                    ));
+                }
+            }
+            fields = fields.child(row);
+        }
+        div()
+            .max_w(px(900.))
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgb(STATUS_QUESTION))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(STATUS_QUESTION))
+                    .child(format!("QUESTION FROM {}", agent.name)),
+            )
+            .child(
+                div()
+                    .mt_1()
+                    .text_sm()
+                    .text_color(rgb(TEXT))
+                    .child(question.message.clone()),
+            )
+            .child(fields)
+            .when_some(question.error.as_ref(), |card, error| {
+                card.child(
+                    div()
+                        .mt_2()
+                        .text_sm()
+                        .text_color(rgb(STATUS_ERROR))
+                        .child(error.clone()),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .mt_4()
+                    .child(self.elicitation_action_button(
+                        question_index,
+                        "Answer",
+                        "accept",
+                        true,
+                        cx,
+                    ))
+                    .child(self.elicitation_action_button(
+                        question_index,
+                        "Decline",
+                        "decline",
+                        false,
+                        cx,
+                    ))
+                    .child(self.elicitation_action_button(
+                        question_index,
+                        "Cancel",
+                        "cancel",
+                        false,
+                        cx,
+                    )),
+            )
+    }
+
+    fn render_elicitation_options(
+        &self,
+        question_index: usize,
+        field_index: usize,
+        options: &[(String, String)],
+        is_selected: impl Fn(usize) -> bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut choices = div().flex().flex_wrap().gap_2();
+        for (option_index, (_, label)) in options.iter().enumerate() {
+            choices = choices.child(
+                div()
+                    .id((
+                        "question-option",
+                        ((question_index as u64) << 40)
+                            | ((field_index as u64) << 20)
+                            | option_index as u64,
+                    ))
+                    .cursor_pointer()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(if is_selected(option_index) {
+                        ACCENT
+                    } else {
+                        BORDER
+                    }))
+                    .bg(rgb(if is_selected(option_index) {
+                        ACCENT_SURFACE
+                    } else {
+                        SURFACE
+                    }))
+                    .px_3()
+                    .py_2()
+                    .text_sm()
+                    .text_color(rgb(TEXT))
+                    .child(label.clone())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_elicitation_option(
+                            question_index,
+                            field_index,
+                            option_index,
+                            cx,
+                        )
+                    })),
+            );
+        }
+        choices
+    }
+
+    fn elicitation_action_button(
+        &self,
+        question_index: usize,
+        label: &'static str,
+        action: &'static str,
+        primary: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id((
+                "question-action",
+                ((question_index as u64) << 2)
+                    | match action {
+                        "accept" => 0,
+                        "decline" => 1,
+                        _ => 2,
+                    },
+            ))
+            .cursor_pointer()
+            .rounded_md()
+            .px_3()
+            .py_2()
+            .text_sm()
+            .bg(rgb(if primary { ACCENT_SURFACE } else { SURFACE }))
+            .text_color(rgb(TEXT))
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.answer_elicitation(question_index, action, cx)
+            }))
     }
 }
 

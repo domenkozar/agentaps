@@ -7,16 +7,31 @@ mod picker;
 mod sidebar;
 mod tool_group;
 
-fn status_badge(agent_id: u64, status: Status) -> impl IntoElement {
+fn status_badge(agent: &AgentView) -> impl IntoElement {
+    let pending = agent.elicitations.len();
+    let color = if pending > 0 {
+        STATUS_QUESTION
+    } else {
+        agent.status.color()
+    };
+    let label = if pending > 0 {
+        format!(
+            "{pending} question{} pending · {}",
+            if pending == 1 { "" } else { "s" },
+            agent.status.label()
+        )
+    } else {
+        agent.status.label().to_owned()
+    };
     div()
-        .id(("status", agent_id))
+        .id(("status", agent.config.id))
         .flex()
         .flex_shrink_0()
         .size(px(12.))
         .items_center()
         .justify_center()
-        .child(div().size(px(7.)).rounded_full().bg(rgb(status.color())))
-        .tooltip(move |window, cx| Tooltip::new(status.label()).build(window, cx))
+        .child(div().size(px(7.)).rounded_full().bg(rgb(color)))
+        .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
 }
 
 impl Render for Workspace {
