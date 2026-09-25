@@ -3,13 +3,13 @@
 
 use gpui::App;
 use gpui_component::{
-    scroll::ScrollbarShow,
+    scroll::ScrollbarMode,
     theme::{Theme, ThemeMode},
 };
 
 pub fn apply(cx: &mut App) {
     Theme::change(ThemeMode::Dark, None, cx);
-    Theme::global_mut(cx).scrollbar_show = ScrollbarShow::Always;
+    Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 }
 
 pub const BG: u32 = 0x10151c;

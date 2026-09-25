@@ -5,15 +5,15 @@ use crate::theme::*;
 use crate::{config, theme};
 use agent_client_protocol_schema::{ProtocolVersion, v2};
 use gpui::{
-    App, Application, Bounds, Context, DragMoveEvent, Entity, Focusable, IntoElement, KeyBinding,
-    KeyDownEvent, ListAlignment, ListState, MouseButton, Render, StatefulInteractiveElement,
-    Subscription, Timer, Window, WindowBounds, WindowOptions, actions, div, prelude::*, px,
-    relative, rems, rgb, size,
+    App, Bounds, Context, DragMoveEvent, Entity, Focusable, IntoElement, KeyBinding, KeyDownEvent,
+    ListAlignment, ListState, MouseButton, Render, StatefulInteractiveElement, Subscription,
+    Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, relative, rems, rgb, size,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Root,
     input::{
         Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp, Position,
+        Textarea, TextareaState,
     },
     scroll::ScrollableElement,
     text::{TextView, TextViewStyle},
@@ -66,6 +66,22 @@ actions!(workspace, [QuickOpen]);
 struct SessionLocation {
     project_index: usize,
     agent_index: usize,
+}
+
+fn session_search_score(query: &str, path: &Path, branch: &str, agent: &str) -> Option<i32> {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    [
+        score(query, &name).map(|rank| rank + 30),
+        score(query, agent).map(|rank| rank + 30),
+        score(query, &path.to_string_lossy()),
+        score(query, branch),
+    ]
+    .into_iter()
+    .flatten()
+    .max()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -270,12 +286,13 @@ struct Workspace {
     folder_scan_complete: bool,
     available_agents: Vec<AgentChoice>,
     picker_selection: usize,
+    sidebar_selection: usize,
     slash_selection: usize,
     slash_dismissed: bool,
     prompt_recall: Option<PromptRecall>,
     picker_input: Entity<InputState>,
     sidebar_search: Entity<InputState>,
-    composer: Entity<InputState>,
+    composer: Entity<TextareaState>,
     chat_list: ListState,
     chat_list_agent: Option<u64>,
     chat_rows: Vec<ChatRow>,
@@ -374,6 +391,11 @@ impl Workspace {
         if self.view.displayed_session() != view.displayed_session() {
             self.prompt_recall = None;
         }
+        if matches!(self.view, WorkspaceView::Archive { .. })
+            != matches!(view, WorkspaceView::Archive { .. })
+        {
+            self.sidebar_selection = 0;
+        }
         self.view = view;
         self.mark_displayed_agent_viewed();
     }
@@ -390,18 +412,28 @@ impl Workspace {
         let sidebar_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search sessions…"));
         let composer = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .auto_grow(1, 6)
+                .submit_on_enter(true)
                 .placeholder("Ask your agent…")
         });
         let _subscriptions = vec![
             cx.subscribe_in(
                 &sidebar_search,
                 window,
-                |_, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::Change) {
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        this.sidebar_selection = 0;
+                        this.select_sidebar_session(cx);
                         cx.notify();
                     }
+                    InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    } => {
+                        this.confirm_sidebar_session(window, cx);
+                    }
+                    _ => {}
                 },
             ),
             cx.subscribe_in(
@@ -412,7 +444,10 @@ impl Workspace {
                         this.picker_selection = 0;
                         cx.notify();
                     }
-                    InputEvent::PressEnter { secondary: false } => {
+                    InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    } => {
                         this.confirm_picker(window, cx);
                     }
                     _ => {}
@@ -432,7 +467,10 @@ impl Workspace {
                         this.slash_dismissed = false;
                         cx.notify();
                     }
-                    InputEvent::PressEnter { secondary: false } => this.send_prompt(window, cx),
+                    InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    } => this.send_prompt(window, cx),
                     _ => {}
                 },
             ),
@@ -503,6 +541,7 @@ impl Workspace {
             folder_scan_complete: false,
             available_agents: installed_agents(),
             picker_selection: 0,
+            sidebar_selection: 0,
             slash_selection: 0,
             slash_dismissed: false,
             prompt_recall: None,
@@ -583,10 +622,11 @@ impl Workspace {
                     .update(cx, |input, cx| input.focus(window, cx));
             }
         }
+        let background_executor = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
             let mut ticks = 0u32;
             loop {
-                Timer::after(Duration::from_millis(100)).await;
+                background_executor.timer(Duration::from_millis(100)).await;
                 if this
                     .update_in(cx, |this, window, cx| {
                         this.poll_events(window, cx);
@@ -688,6 +728,107 @@ impl Workspace {
             matches.truncate(14);
         }
         matches
+    }
+
+    fn sidebar_results(&self, query: &str) -> Vec<SessionLocation> {
+        let archive_view = matches!(self.view, WorkspaceView::Archive { .. });
+        let mut matches = self
+            .projects
+            .iter()
+            .enumerate()
+            .flat_map(|(project_index, project)| {
+                project
+                    .agents
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(agent_index, agent)| {
+                        if agent.config.archived != archive_view {
+                            return None;
+                        }
+                        let rank = session_search_score(
+                            query,
+                            &project.path,
+                            &project.branch,
+                            &agent.name,
+                        )?;
+                        let order = self
+                            .sidebar_order
+                            .iter()
+                            .position(|id| *id == agent.config.id)
+                            .unwrap_or(usize::MAX);
+                        Some((
+                            rank,
+                            order,
+                            SessionLocation {
+                                project_index,
+                                agent_index,
+                            },
+                        ))
+                    })
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|a, b| {
+            if query.is_empty() {
+                a.1.cmp(&b.1)
+            } else {
+                b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))
+            }
+        });
+        matches
+            .into_iter()
+            .map(|(_, _, location)| location)
+            .collect()
+    }
+
+    fn confirm_sidebar_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.sidebar_search.read(cx).value().trim().to_owned();
+        if query.is_empty() {
+            return;
+        }
+        let Some(location) = self
+            .sidebar_results(&query)
+            .get(self.sidebar_selection)
+            .copied()
+        else {
+            return;
+        };
+        if self.projects[location.project_index].agents[location.agent_index]
+            .config
+            .archived
+        {
+            self.set_archived(
+                location.project_index,
+                location.agent_index,
+                false,
+                window,
+                cx,
+            );
+        } else {
+            self.set_view(WorkspaceView::Conversation(location));
+            self.composer
+                .update(cx, |input, cx| input.focus(window, cx));
+            cx.notify();
+        }
+    }
+
+    fn select_sidebar_session(&mut self, cx: &mut Context<Self>) {
+        let query = self.sidebar_search.read(cx).value().trim().to_owned();
+        if query.is_empty() {
+            return;
+        }
+        let Some(location) = self
+            .sidebar_results(&query)
+            .get(self.sidebar_selection)
+            .copied()
+        else {
+            return;
+        };
+        if !self.projects[location.project_index].agents[location.agent_index]
+            .config
+            .archived
+        {
+            self.set_view(WorkspaceView::Conversation(location));
+        }
     }
 
     fn agent_results(&self, cx: &Context<Self>) -> Vec<AgentChoice> {
@@ -888,12 +1029,53 @@ impl Workspace {
         self.open_picker(PickerStep::Folders, window, cx);
     }
 
-    fn picker_key_down(
+    fn workspace_key_down(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.keystroke.key == "escape"
+            && !matches!(self.view, WorkspaceView::NewSession { .. })
+            && let Some(SessionLocation {
+                project_index,
+                agent_index,
+            }) = self.view.displayed_session()
+        {
+            let agent = &self.projects[project_index].agents[agent_index];
+            if agent.active_work && !agent.cancel_requested {
+                self.cancel_prompt(cx);
+                cx.stop_propagation();
+                return;
+            }
+        }
+        if self
+            .sidebar_search
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+        {
+            let query = self.sidebar_search.read(cx).value().trim().to_owned();
+            if !query.is_empty() {
+                let count = self.sidebar_results(&query).len();
+                match event.keystroke.key.as_str() {
+                    "down" if count > 0 => {
+                        self.sidebar_selection = (self.sidebar_selection + 1) % count;
+                        self.select_sidebar_session(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    "up" if count > 0 => {
+                        self.sidebar_selection = (self.sidebar_selection + count - 1) % count;
+                        self.select_sidebar_session(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
         let WorkspaceView::NewSession { step, .. } = self.view else {
             return;
         };
@@ -1040,33 +1222,36 @@ impl Drop for Workspace {
 }
 
 pub(crate) fn run() {
-    Application::new().with_assets(Assets).run(|cx: &mut App| {
-        gpui_component::init(cx);
-        #[cfg(target_os = "macos")]
-        cx.bind_keys([
-            KeyBinding::new("cmd-p", QuickOpen, None),
-            KeyBinding::new(
+    gpui_ce_platform::application()
+        .with_assets(Assets)
+        .run(|cx: &mut App| {
+            gpui_component::init(cx);
+            cx.bind_keys([KeyBinding::new(
                 "ctrl-enter",
-                gpui_component::input::Enter { secondary: true },
+                gpui_component::input::Enter {
+                    secondary: true,
+                    shift: true,
+                },
                 Some("Input"),
-            ),
-        ]);
-        #[cfg(not(target_os = "macos"))]
-        cx.bind_keys([KeyBinding::new("ctrl-p", QuickOpen, None)]);
-        theme::apply(cx);
-        let bounds = Bounds::centered(None, size(px(1200.), px(760.)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            },
-            |window, cx| {
-                window.set_window_title("Agentaps");
-                let view = cx.new(|cx| Workspace::new(window, cx));
-                cx.new(|cx| Root::new(view, window, cx))
-            },
-        )
-        .expect("Could not open GPUI window");
-        cx.activate(true);
-    });
+            )]);
+            #[cfg(target_os = "macos")]
+            cx.bind_keys([KeyBinding::new("cmd-p", QuickOpen, None)]);
+            #[cfg(not(target_os = "macos"))]
+            cx.bind_keys([KeyBinding::new("ctrl-p", QuickOpen, None)]);
+            theme::apply(cx);
+            let bounds = Bounds::centered(None, size(px(1200.), px(760.)), cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    window.set_window_title("Agentaps");
+                    let view = cx.new(|cx| Workspace::new(window, cx));
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            )
+            .expect("Could not open GPUI window");
+            cx.activate(true);
+        });
 }

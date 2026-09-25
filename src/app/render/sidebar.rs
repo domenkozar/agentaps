@@ -14,52 +14,25 @@ impl Workspace {
             .flat_map(|project| &project.agents)
             .filter(|agent| agent.config.archived)
             .count();
-        let mut rows = self
-            .projects
-            .iter()
-            .enumerate()
-            .flat_map(|(project_index, project)| {
-                project
-                    .agents
-                    .iter()
-                    .enumerate()
-                    .map(move |(agent_index, agent)| (project_index, agent_index, project, agent))
-            })
-            .collect::<Vec<_>>();
-        rows.sort_by_key(|(_, _, _, agent)| {
-            self.sidebar_order
-                .iter()
-                .position(|id| *id == agent.config.id)
-                .unwrap_or(usize::MAX)
-        });
-        for (project_index, agent_index, project, agent) in rows {
+        for (index, location) in self.sidebar_results(&session_query).into_iter().enumerate() {
+            let SessionLocation {
+                project_index,
+                agent_index,
+            } = location;
+            let project = &self.projects[project_index];
+            let agent = &project.agents[agent_index];
             let archived = agent.config.archived;
-            if archived != archive_view {
-                continue;
-            }
             let name = project
                 .path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| project.path.display().to_string());
-            if !session_query.is_empty()
-                && [
-                    name.as_str(),
-                    project.path.to_str().unwrap_or_default(),
-                    project.branch.as_str(),
-                    agent.name.as_str(),
-                ]
-                .iter()
-                .all(|value| score(&session_query, value).is_none())
-            {
-                continue;
-            }
             visible_sessions += 1;
-            let selected = self.view.highlighted_session()
-                == Some(SessionLocation {
-                    project_index,
-                    agent_index,
-                });
+            let selected = if session_query.is_empty() {
+                self.view.highlighted_session() == Some(location)
+            } else {
+                index == self.sidebar_selection
+            };
             let agent_id = agent.config.id;
             let row_group = format!("agent-row-{agent_id}");
             let row = div()
@@ -81,6 +54,7 @@ impl Workspace {
                         this.set_archived(project_index, agent_index, false, window, cx);
                         return;
                     }
+                    this.sidebar_selection = index;
                     this.set_view(WorkspaceView::Conversation(SessionLocation {
                         project_index,
                         agent_index,

@@ -7,7 +7,7 @@ impl Workspace {
         message_index: usize,
         end: usize,
         text_style: TextViewStyle,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let tool_entries = &agent.messages[message_index..end];
@@ -112,8 +112,6 @@ impl Workspace {
                                 TextView::markdown(
                                     (text_id, row_key.1.to_string()),
                                     markdown_code_block(&entry.text),
-                                    window,
-                                    cx,
                                 )
                                 .style(text_style.clone())
                                 .selectable(true)

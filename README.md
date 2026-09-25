@@ -22,6 +22,8 @@ Install from crates.io where GPUI's native build dependencies are available:
 cargo install agentaps
 ```
 
+Source builds on Linux need fontconfig and FreeType development files available to `pkg-config`.
+
 From the repository root, with `devenv` installed:
 
 ```sh

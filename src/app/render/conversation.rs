@@ -245,7 +245,7 @@ impl Workspace {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .child(Input::new(&self.composer)),
+                        .child(Textarea::new(&self.composer)),
                 ),
         );
         chat

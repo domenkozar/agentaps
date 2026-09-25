@@ -125,7 +125,7 @@ impl Workspace {
             self.chat_list_agent = Some(agent.config.id);
         } else if let Some((range, count)) = changed_row_range(&self.chat_rows, &rows) {
             let near_bottom = self.chat_list.scroll_px_offset_for_scrollbar().y
-                + self.chat_list.max_offset_for_scrollbar().height
+                + self.chat_list.max_offset_for_scrollbar().y
                 <= px(24.);
             self.chat_list.splice(range, count);
             if near_bottom {
@@ -201,17 +201,16 @@ impl Workspace {
         &self,
         agent: &AgentView,
         index: usize,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let entry = &agent.messages[index];
         let text_id: gpui::ElementId = ("chat", agent.config.id).into();
-        let content =
-            TextView::markdown((text_id, index.to_string()), entry.text.clone(), window, cx)
-                .style(self.chat_text_style(cx))
-                .selectable(true)
-                .text_sm()
-                .text_color(rgb(TEXT));
+        let content = TextView::markdown((text_id, index.to_string()), entry.text.clone())
+            .style(self.chat_text_style(cx))
+            .selectable(true)
+            .text_sm()
+            .text_color(rgb(TEXT));
         match entry.role {
             Role::User | Role::Agent => {
                 let from_user = entry.role == Role::User;

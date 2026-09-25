@@ -4,9 +4,15 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Switched to GPUI CE and its component library for improved Markdown rendering and streaming updates.
+
 ### Added
 
 - Recall earlier prompts with Up and Down in the chat composer, including queued prompts and drafts.
+- Rank session search results by relevance and switch to the selected session as the search changes or Up and Down are pressed.
+- Stop a working agent with Escape, the same as clicking Stop.
 
 ### Documentation
 

@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn session_search_prefers_direct_name_matches() {
+    let direct = session_search_score("agentaps", Path::new("/dev/agentaps"), "main", "Codex");
+    let path_only = session_search_score(
+        "agentaps",
+        Path::new("/dev/agentaps/examples"),
+        "main",
+        "Codex",
+    );
+    assert!(direct > path_only);
+    assert!(session_search_score("codex", Path::new("/dev/project"), "main", "Codex").is_some());
+    assert_eq!(
+        session_search_score("missing", Path::new("/dev/project"), "main", "Codex"),
+        None
+    );
+}
+
+#[test]
 fn workspace_view_keeps_sidebar_selection_exclusive() {
     let first = SessionLocation {
         project_index: 0,

@@ -104,7 +104,7 @@ impl Render for Workspace {
             .flex()
             .bg(rgb(BG))
             .on_action(cx.listener(Self::quick_open))
-            .capture_key_down(cx.listener(Self::picker_key_down))
+            .capture_key_down(cx.listener(Self::workspace_key_down))
             .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
                 this.handle_slash_action(SlashAction::Up, window, cx)
             }))
