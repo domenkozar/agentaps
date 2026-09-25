@@ -1,6 +1,6 @@
 [package]
 name = "agentaps"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Desktop client for agents that speak the Agent Client Protocol"
 license = "Apache-2.0"
