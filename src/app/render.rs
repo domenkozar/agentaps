@@ -2,6 +2,7 @@ use super::*;
 use gpui::Div;
 
 mod conversation;
+mod diff;
 mod entries;
 mod picker;
 mod sidebar;
@@ -64,8 +65,12 @@ impl Render for Workspace {
             agent_index,
         }) = self.view.displayed_session()
         {
-            self.sync_chat_rows(project_index, agent_index);
-            chat = self.render_conversation(chat, project_index, agent_index, cx);
+            if self.diff_visible {
+                chat = self.render_diff(chat, project_index, agent_index, cx);
+            } else {
+                self.sync_chat_rows(project_index, agent_index);
+                chat = self.render_conversation(chat, project_index, agent_index, cx);
+            }
         } else {
             let archived = matches!(self.view, WorkspaceView::Archive { .. });
             chat = chat.child(

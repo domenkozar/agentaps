@@ -1,5 +1,6 @@
 use crate::acp::{Connection, Event};
 use crate::config::{AgentConfig, ChatEntry, Config, ProjectConfig, Role, SlashCommand};
+use crate::diff_view::{File as DiffFile, Presentation as DiffPresentation, Row as DiffRow};
 use crate::discovery::{AgentChoice, discover_folders, installed_agents, score};
 use crate::folder_search::{FolderSearch, inject_path};
 use crate::theme::*;
@@ -26,7 +27,10 @@ use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
     time::{Duration, Instant},
 };
 
@@ -39,6 +43,8 @@ mod tests;
 mod tool_activity;
 
 use self::{agent::*, elicitation::*, tool_activity::*};
+
+type DiffLoadResult = Result<(Vec<DiffFile>, DiffPresentation, Arc<Vec<DiffRow>>), String>;
 
 fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
     let Some(from) = order.iter().position(|id| *id == dragged) else {
@@ -297,6 +303,23 @@ struct Workspace {
     chat_list: ListState,
     chat_list_agent: Option<u64>,
     chat_rows: Vec<ChatRow>,
+    diff_visible: bool,
+    diff_presentation: DiffPresentation,
+    diff_rows: Arc<Vec<DiffRow>>,
+    diff_list: ListState,
+    diff_tx: Sender<(u64, DiffLoadResult)>,
+    diff_rx: Receiver<(u64, DiffLoadResult)>,
+    diff_request_id: u64,
+    diff_watch_tx: Sender<u64>,
+    diff_watch_rx: Receiver<u64>,
+    diff_watch_generation: u64,
+    diff_watcher: Option<notify::RecommendedWatcher>,
+    diff_refresh_due: Option<Instant>,
+    diff_first_change_at: Option<Instant>,
+    diff_poll_at: Option<Instant>,
+    diff_loading: bool,
+    diff_error: Option<String>,
+    diff_files: Vec<DiffFile>,
     dirty: bool,
     last_saved: Instant,
     notice: Option<String>,
@@ -391,6 +414,11 @@ impl Workspace {
     fn set_view(&mut self, view: WorkspaceView) {
         if self.view.displayed_session() != view.displayed_session() {
             self.prompt_recall = None;
+            self.close_diff();
+            self.diff_error = None;
+            self.diff_files.clear();
+            self.diff_rows = Arc::new(Vec::new());
+            self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
         }
         if matches!(self.view, WorkspaceView::Archive { .. })
             != matches!(view, WorkspaceView::Archive { .. })
@@ -399,6 +427,62 @@ impl Workspace {
         }
         self.view = view;
         self.mark_displayed_agent_viewed();
+    }
+
+    fn open_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
+        self.diff_visible = true;
+        self.diff_watch_generation += 1;
+        let path = &self.projects[project_index].path;
+        self.diff_watcher =
+            crate::diff_watch::start(path, self.diff_watch_generation, self.diff_watch_tx.clone())
+                .ok();
+        self.diff_poll_at = self
+            .diff_watcher
+            .is_none()
+            .then(|| Instant::now() + Duration::from_secs(3));
+        self.diff_refresh_due = None;
+        self.diff_first_change_at = None;
+        self.refresh_diff(project_index, cx);
+    }
+
+    fn close_diff(&mut self) {
+        self.diff_visible = false;
+        self.diff_request_id += 1;
+        self.diff_loading = false;
+        self.diff_watcher = None;
+        self.diff_watch_generation += 1;
+        self.diff_refresh_due = None;
+        self.diff_first_change_at = None;
+        self.diff_poll_at = None;
+    }
+
+    fn refresh_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
+        self.diff_request_id += 1;
+        let request_id = self.diff_request_id;
+        let path = self.projects[project_index].path.clone();
+        let presentation = self.diff_presentation;
+        let tx = self.diff_tx.clone();
+        self.diff_loading = true;
+        self.diff_error = None;
+        std::thread::spawn(move || {
+            let result = crate::git_diff::load(&path).map(|files| {
+                let rows = Arc::new(crate::diff_view::flatten(&files, presentation));
+                (files, presentation, rows)
+            });
+            let _ = tx.send((request_id, result));
+        });
+        cx.notify();
+    }
+
+    fn set_diff_presentation(
+        &mut self,
+        presentation: crate::diff_view::Presentation,
+        cx: &mut Context<Self>,
+    ) {
+        self.diff_presentation = presentation;
+        self.diff_rows = Arc::new(crate::diff_view::flatten(&self.diff_files, presentation));
+        self.diff_list = ListState::new(self.diff_rows.len(), ListAlignment::Top, px(28.));
+        cx.notify();
     }
 
     fn mark_displayed_agent_viewed(&mut self) {
@@ -487,6 +571,8 @@ impl Workspace {
             ),
         ];
         let (events_tx, events_rx) = mpsc::channel();
+        let (diff_tx, diff_rx) = mpsc::channel();
+        let (diff_watch_tx, diff_watch_rx) = mpsc::channel();
         let (config, migrate_config, notice) = match config::load() {
             Ok((config, migrate)) => (config, migrate, None),
             Err(error) => (
@@ -575,6 +661,23 @@ impl Workspace {
             chat_list: ListState::new(0, ListAlignment::Bottom, px(300.)),
             chat_list_agent: None,
             chat_rows: Vec::new(),
+            diff_visible: false,
+            diff_presentation: crate::diff_view::Presentation::Unified,
+            diff_rows: Arc::new(Vec::new()),
+            diff_list: ListState::new(0, ListAlignment::Top, px(28.)),
+            diff_tx,
+            diff_rx,
+            diff_request_id: 0,
+            diff_watch_tx,
+            diff_watch_rx,
+            diff_watch_generation: 0,
+            diff_watcher: None,
+            diff_refresh_due: None,
+            diff_first_change_at: None,
+            diff_poll_at: None,
+            diff_loading: false,
+            diff_error: None,
+            diff_files: Vec::new(),
             dirty: migrate_config,
             last_saved: Instant::now(),
             notice,

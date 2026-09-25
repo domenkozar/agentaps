@@ -241,7 +241,7 @@ impl Workspace {
         } else {
             "Show archived sessions"
         };
-        let sidebar = div()
+        div()
             .w(px(sidebar_width))
             .min_w(px(180.))
             .flex_shrink_0()
@@ -332,8 +332,6 @@ impl Workspace {
                                 this.open_picker(PickerStep::Folders, window, cx)
                             })),
                     ),
-            );
-
-        sidebar
+            )
     }
 }

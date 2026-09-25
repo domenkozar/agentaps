@@ -80,6 +80,24 @@ impl Workspace {
                 )
                 .child(
                     div()
+                        .id("open-diff")
+                        .flex_shrink_0()
+                        .px_3()
+                        .py_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .text_sm()
+                        .text_color(rgb(TEXT))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(HOVER)))
+                        .child("Diff")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_diff(project_index, cx);
+                        })),
+                )
+                .child(
+                    div()
                         .id("reset-context")
                         .flex_shrink_0()
                         .flex()

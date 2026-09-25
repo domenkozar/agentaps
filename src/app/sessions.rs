@@ -247,6 +247,53 @@ impl Workspace {
 
     pub(super) fn poll_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
+        while let Ok((request_id, result)) = self.diff_rx.try_recv() {
+            if request_id != self.diff_request_id {
+                continue;
+            }
+            self.diff_loading = false;
+            match result {
+                Ok((files, presentation, rows)) => {
+                    let scroll_top = self.diff_list.logical_scroll_top();
+                    self.diff_rows = if presentation == self.diff_presentation {
+                        rows
+                    } else {
+                        Arc::new(crate::diff_view::flatten(&files, self.diff_presentation))
+                    };
+                    self.diff_list =
+                        ListState::new(self.diff_rows.len(), ListAlignment::Top, px(28.));
+                    self.diff_list.scroll_to(scroll_top);
+                    self.diff_files = files;
+                    self.diff_error = None;
+                }
+                Err(error) => self.diff_error = Some(error),
+            }
+            cx.notify();
+        }
+        let mut watched_change = false;
+        while let Ok(generation) = self.diff_watch_rx.try_recv() {
+            watched_change |= self.diff_visible && generation == self.diff_watch_generation;
+        }
+        let now = Instant::now();
+        if watched_change {
+            let first_change = *self.diff_first_change_at.get_or_insert(now);
+            self.diff_refresh_due =
+                Some((now + Duration::from_millis(350)).min(first_change + Duration::from_secs(2)));
+        }
+        if self.diff_poll_at.is_some_and(|poll_at| now >= poll_at) {
+            self.diff_refresh_due.get_or_insert(now);
+            self.diff_poll_at = Some(now + Duration::from_secs(3));
+        }
+        if self.diff_visible
+            && !self.diff_loading
+            && self.diff_refresh_due.is_some_and(|due| now >= due)
+        {
+            self.diff_refresh_due = None;
+            self.diff_first_change_at = None;
+            if let Some(session) = self.view.displayed_session() {
+                self.refresh_diff(session.project_index, cx);
+            }
+        }
         while let Ok(event) = self.events_rx.try_recv() {
             changed = true;
             match event {

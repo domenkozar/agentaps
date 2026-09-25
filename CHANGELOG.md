@@ -6,17 +6,22 @@ Notable changes to Agentaps are recorded here.
 
 ### Changed
 
+- Diff views refresh automatically as checkout changes arrive.
+- Prepared diff rows in the background to keep large changesets responsive.
 - Switched to GPUI CE and its component library for improved Markdown rendering and streaming updates.
 - Made folder search responsive while creating sessions by matching paths in the background and reusing results between renders.
 
 ### Added
 
+- View each agent's checkout changes against HEAD in unified or split diff layouts, including untracked files.
 - Recall earlier prompts with Up and Down in the chat composer, including queued prompts and drafts.
 - Rank session search results by relevance and switch to the selected session as the search changes or Up and Down are pressed.
 - Stop a working agent with Escape, the same as clicking Stop.
 
 ### Fixed
 
+- Diff views fill the available panel height so large changesets scroll correctly.
+- Sidebar rendering passes strict lint checks.
 - Escape reliably stops a working agent while the chat input is focused.
 
 ### Documentation
