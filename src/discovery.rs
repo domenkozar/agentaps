@@ -116,27 +116,6 @@ pub fn score(query: &str, candidate: &str) -> Option<i32> {
     Some(score - (candidate.len() as i32 / 8))
 }
 
-pub fn folder_matches(paths: &[PathBuf], query: &str, limit: usize) -> Vec<PathBuf> {
-    let mut matches = paths
-        .iter()
-        .filter_map(|path| {
-            let name = path.file_name()?.to_string_lossy();
-            let name_score = score(query, &name);
-            let path_score = score(query, &path.to_string_lossy());
-            let rank = name_score.map(|rank| rank + 30).or(path_score)?;
-            Some((rank, path))
-        })
-        .collect::<Vec<_>>();
-    matches.sort_by(|(a_score, a_path), (b_score, b_path)| {
-        b_score.cmp(a_score).then_with(|| a_path.cmp(b_path))
-    });
-    matches
-        .into_iter()
-        .take(limit)
-        .map(|(_, path)| path.clone())
-        .collect()
-}
-
 pub fn discover_folders() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(home) = env::var_os("HOME") {
@@ -195,16 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fuzzy_match_prefers_folder_name_and_subsequences() {
-        let paths = vec![
-            PathBuf::from("/work/terminal-dev"),
-            PathBuf::from("/work/dev-terminal"),
-            PathBuf::from("/other/term-notes"),
-        ];
-        assert_eq!(
-            folder_matches(&paths, "devterm", 3),
-            vec![PathBuf::from("/work/dev-terminal")]
-        );
+    fn fuzzy_match_accepts_subsequences() {
         assert!(score("abc", "a_b-c").is_some());
         assert!(score("xyz", "dev-terminal").is_none());
     }

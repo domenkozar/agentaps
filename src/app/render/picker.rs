@@ -9,17 +9,17 @@ impl Workspace {
         let query = self.picker_input.read(cx).value().to_string();
         let mut results = div().flex().flex_col().gap_1();
         if is_folders {
-            let matches = self.folder_results(cx);
+            let matches = self.folder_search.results();
             if matches.is_empty() {
                 results = results.child(div().p_5().text_sm().text_color(rgb(MUTED)).child(
-                    if !self.folder_scan_complete && query.is_empty() {
+                    if !self.folder_scan_complete || self.folder_search.searching() {
                         "Looking for folders…"
                     } else {
                         "No matching folders. Enter an existing absolute path."
                     },
                 ));
             }
-            for (index, path) in matches.into_iter().enumerate() {
+            for (index, path) in matches.iter().cloned().enumerate() {
                 let name = path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())

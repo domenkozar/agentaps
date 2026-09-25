@@ -1,6 +1,7 @@
 use crate::acp::{Connection, Event};
 use crate::config::{AgentConfig, ChatEntry, Config, ProjectConfig, Role, SlashCommand};
-use crate::discovery::{AgentChoice, discover_folders, folder_matches, installed_agents, score};
+use crate::discovery::{AgentChoice, discover_folders, installed_agents, score};
+use crate::folder_search::{FolderSearch, inject_path};
 use crate::theme::*;
 use crate::{config, theme};
 use agent_client_protocol_schema::{ProtocolVersion, v2};
@@ -282,7 +283,7 @@ struct Workspace {
     events_tx: Sender<Event>,
     events_rx: Receiver<Event>,
     folders_rx: Receiver<Vec<PathBuf>>,
-    folders: Vec<PathBuf>,
+    folder_search: FolderSearch,
     folder_scan_complete: bool,
     available_agents: Vec<AgentChoice>,
     picker_selection: usize,
@@ -442,6 +443,16 @@ impl Workspace {
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
                         this.picker_selection = 0;
+                        if matches!(
+                            this.view,
+                            WorkspaceView::NewSession {
+                                step: PickerStep::Folders,
+                                ..
+                            }
+                        ) {
+                            this.folder_search
+                                .set_query(&this.picker_input.read(cx).value());
+                        }
                         cx.notify();
                     }
                     InputEvent::PressEnter {
@@ -518,13 +529,26 @@ impl Workspace {
                 sidebar_order.push(id);
             }
         }
-        let recent_folders = projects
+        let mut recent_folders: Vec<PathBuf> = projects
             .iter()
             .map(|project| project.path.clone())
             .collect();
+        if let Ok(cwd) = std::env::current_dir().and_then(|path| path.canonicalize())
+            && !recent_folders.contains(&cwd)
+        {
+            recent_folders.insert(0, cwd);
+        }
+        let folder_search = FolderSearch::new(recent_folders.clone());
+        let folder_injector = folder_search.injector();
         let (folders_tx, folders_rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = folders_tx.send(discover_folders());
+            let folders = discover_folders();
+            for path in &folders {
+                if !recent_folders.contains(path) {
+                    inject_path(&folder_injector, path.clone());
+                }
+            }
+            let _ = folders_tx.send(folders);
         });
         let mut this = Self {
             projects,
@@ -537,7 +561,7 @@ impl Workspace {
             events_tx,
             events_rx,
             folders_rx,
-            folders: recent_folders,
+            folder_search,
             folder_scan_complete: false,
             available_agents: installed_agents(),
             picker_selection: 0,
@@ -635,8 +659,11 @@ impl Workspace {
                                 .extend(this.projects.iter().map(|project| project.path.clone()));
                             folders.sort();
                             folders.dedup();
-                            this.folders = folders;
+                            this.folder_search.set_paths(&folders);
                             this.folder_scan_complete = true;
+                            cx.notify();
+                        }
+                        if this.folder_search.tick() {
                             cx.notify();
                         }
                         ticks += 1;
@@ -683,6 +710,9 @@ impl Workspace {
     fn open_picker(&mut self, step: PickerStep, window: &mut Window, cx: &mut Context<Self>) {
         self.set_view(self.view.open_picker(step));
         self.picker_selection = 0;
+        if step == PickerStep::Folders {
+            self.folder_search.set_query("");
+        }
         self.picker_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.set_placeholder(
@@ -715,19 +745,6 @@ impl Workspace {
             }
             _ => {}
         }
-    }
-
-    fn folder_results(&self, cx: &Context<Self>) -> Vec<PathBuf> {
-        let query = self.picker_input.read(cx).value().to_string();
-        let mut matches = folder_matches(&self.folders, query.trim(), 14);
-        if let Ok(path) = PathBuf::from(query.trim()).canonicalize()
-            && path.is_dir()
-            && !matches.contains(&path)
-        {
-            matches.insert(0, path);
-            matches.truncate(14);
-        }
-        matches
     }
 
     fn sidebar_results(&self, query: &str) -> Vec<SessionLocation> {
@@ -871,7 +888,7 @@ impl Workspace {
                 path: path.clone(),
                 agents: Vec::new(),
             });
-            self.folders.push(path);
+            self.folder_search.add_recent(path);
             self.persist();
             self.projects.len() - 1
         };
@@ -992,7 +1009,12 @@ impl Workspace {
                 step: PickerStep::Folders,
                 ..
             } => {
-                if let Some(path) = self.folder_results(cx).get(self.picker_selection).cloned() {
+                if let Some(path) = self
+                    .folder_search
+                    .results()
+                    .get(self.picker_selection)
+                    .cloned()
+                {
                     self.select_folder(path, window, cx);
                 } else {
                     self.notice =
@@ -1066,7 +1088,7 @@ impl Workspace {
             return;
         };
         let count = match step {
-            PickerStep::Folders => self.folder_results(cx).len(),
+            PickerStep::Folders => self.folder_search.results().len(),
             PickerStep::Agents { .. } => {
                 self.agent_results(cx).len()
                     + usize::from(!self.picker_input.read(cx).value().trim().is_empty())

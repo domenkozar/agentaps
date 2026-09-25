@@ -7,6 +7,7 @@ Notable changes to Agentaps are recorded here.
 ### Changed
 
 - Switched to GPUI CE and its component library for improved Markdown rendering and streaming updates.
+- Made folder search responsive while creating sessions by matching paths in the background and reusing results between renders.
 
 ### Added
 
