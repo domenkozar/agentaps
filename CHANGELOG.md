@@ -4,6 +4,17 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Search fields show a clear button while typing, and Escape clears the current search.
+- Session headers let you choose from models offered by the connected agent.
+- Session headers let you start a new session with another coding agent in the same project.
+- Sessions let you choose reasoning effort when the connected agent offers that setting.
+
+### Changed
+
+- Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
+
 ## [0.2.1] - 2026-09-25
 
 ### Changed

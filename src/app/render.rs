@@ -69,7 +69,7 @@ impl Render for Workspace {
                 chat = self.render_diff(chat, project_index, agent_index, cx);
             } else {
                 self.sync_chat_rows(project_index, agent_index);
-                chat = self.render_conversation(chat, project_index, agent_index, cx);
+                chat = self.render_conversation(chat, project_index, agent_index, window, cx);
             }
         } else {
             let archived = matches!(self.view, WorkspaceView::Archive { .. });

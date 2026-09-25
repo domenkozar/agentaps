@@ -12,11 +12,13 @@ use gpui::{
     Window, WindowBounds, WindowOptions, actions, div, prelude::*, px, relative, rems, rgb, size,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Root,
+    ActiveTheme, Disableable, Icon, IconName, Root,
+    button::{Button, ButtonVariants},
     input::{
         Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp, Position,
         Textarea, TextareaState,
     },
+    menu::{DropdownMenu, PopupMenuItem},
     scroll::ScrollableElement,
     text::{TextView, TextViewStyle},
     tooltip::Tooltip,
@@ -1059,6 +1061,17 @@ impl Workspace {
             cx.notify();
             return;
         };
+        self.start_agent_for_project(project_index, command, name, window, cx);
+    }
+
+    fn start_agent_for_project(
+        &mut self,
+        project_index: usize,
+        command: Vec<String>,
+        name: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let config = AgentConfig {
             id: self.next_agent_id,
             command,
@@ -1210,9 +1223,16 @@ impl Workspace {
             .focus_handle(cx)
             .is_focused(window)
         {
-            let query = self.sidebar_search.read(cx).value().trim().to_owned();
+            let value = self.sidebar_search.read(cx).value().to_string();
+            if event.keystroke.key == "escape" && !value.is_empty() {
+                self.sidebar_search
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                cx.stop_propagation();
+                return;
+            }
+            let query = value.trim();
             if !query.is_empty() {
-                let count = self.sidebar_results(&query).len();
+                let count = self.sidebar_results(query).len();
                 match event.keystroke.key.as_str() {
                     "down" if count > 0 => {
                         self.sidebar_selection = (self.sidebar_selection + 1) % count;
@@ -1253,7 +1273,12 @@ impl Workspace {
                 cx.notify();
             }
             "escape" => {
-                self.back_from_picker(window, cx);
+                if self.picker_input.read(cx).value().is_empty() {
+                    self.back_from_picker(window, cx);
+                } else {
+                    self.picker_input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                }
                 cx.stop_propagation();
             }
             _ => {}

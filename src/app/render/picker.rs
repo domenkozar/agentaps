@@ -273,7 +273,7 @@ impl Workspace {
                                 .border_color(rgb(BORDER))
                                 .bg(rgb(SURFACE))
                                 .p_2()
-                                .child(Input::new(&self.picker_input)),
+                                .child(Input::new(&self.picker_input).cleanable(true)),
                         )
                         .child(
                             div()

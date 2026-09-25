@@ -347,12 +347,21 @@ fn v1_tool_updates_replace_the_same_call_and_keep_approval_status() {
 #[test]
 fn model_and_context_follow_acp_session_updates() {
     let mut agent = agent(ProtocolVersion::V1);
-    let options = json!([{"id":"model","category":"model","currentValue":"default",
-        "options":[{"value":"default","name":"Default","description":"Opus (1M context)"}]}]);
-    assert_eq!(
-        selected_model(&options).as_deref(),
-        Some("Opus (1M context)")
+    let options = json!([
+        {"id":"model","category":"model","currentValue":"default",
+            "options":[{"value":"default","name":"Default","description":"Opus (1M context)"}]},
+        {"configId":"thought_level","category":"thought_level","type":"select",
+            "currentValue":"high","options":[{"value":"high","name":"High"}]}
+    ]);
+    assert_eq!(model_option(&options).unwrap().label(), "Opus (1M context)");
+    Workspace::handle_update(
+        &mut agent,
+        &json!({"params":{"sessionId":"session-1","update":{
+            "sessionUpdate":"config_option_update","configOptions":options
+        }}}),
     );
+    assert_eq!(agent.model.as_deref(), Some("Opus (1M context)"));
+    assert_eq!(agent.effort_option.as_ref().unwrap().label(), "High");
     Workspace::handle_update(
         &mut agent,
         &json!({"params":{"sessionId":"session-1","update":{
@@ -360,6 +369,50 @@ fn model_and_context_follow_acp_session_updates() {
         }}}),
     );
     assert_eq!(agent.context, Some((42_000, 200_000)));
+}
+
+#[test]
+fn model_options_support_grouped_choices_and_acp_selection() {
+    let options = json!([
+        {"configId":"thought_level","category":"thought_level","type":"select",
+            "currentValue":"low","options":[{"value":"low","name":"Low"}]},
+        {"configId":"provider_model","category":"model","type":"select",
+            "currentValue":"model-b","options":[
+                {"groupId":"fast","name":"Fast","options":[{"value":"model-a","name":"Model A"}]},
+                {"groupId":"strong","name":"Strong","options":[{"value":"model-b","name":"Model B"}]}
+            ]}
+    ]);
+    let option = model_option(&options).unwrap();
+    assert_eq!(option.id, "provider_model");
+    assert_eq!(option.label(), "Model B");
+    assert_eq!(option.choices.len(), 2);
+    assert_eq!(
+        set_config_option_request(7, "session-1", &option, "model-a"),
+        json!({"jsonrpc":"2.0","id":7,"method":"session/set_config_option","params":{
+            "sessionId":"session-1","configId":"provider_model","type":"id","value":"model-a"
+        }})
+    );
+    let effort = effort_option(&options).unwrap();
+    assert_eq!(effort.id, "thought_level");
+    assert_eq!(effort.label(), "Low");
+    assert_eq!(
+        set_config_option_request(8, "session-1", &effort, "low")["params"]["configId"],
+        "thought_level"
+    );
+}
+
+#[test]
+fn reasoning_effort_is_detected_in_model_config_options() {
+    let options = json!([
+        {"configId":"temperature","category":"model_config","name":"Temperature",
+            "type":"select","currentValue":"balanced","options":[{"value":"balanced","name":"Balanced"}]},
+        {"configId":"reasoning_effort","category":"model_config","name":"Reasoning effort",
+            "type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},
+                {"value":"high","name":"High"}]}
+    ]);
+    let effort = effort_option(&options).unwrap();
+    assert_eq!(effort.id, "reasoning_effort");
+    assert_eq!(effort.label(), "High");
 }
 
 #[test]

@@ -61,10 +61,43 @@ pub(super) struct Permission {
     pub(super) options: Vec<(String, String)>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ConfigChoice {
+    pub(super) value: String,
+    pub(super) label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ConfigSelectOption {
+    pub(super) id: String,
+    pub(super) current: String,
+    pub(super) choices: Vec<ConfigChoice>,
+}
+
+impl ConfigSelectOption {
+    pub(super) fn label(&self) -> String {
+        self.choices
+            .iter()
+            .find(|choice| choice.value == self.current)
+            .map(|choice| choice.label.clone())
+            .unwrap_or_else(|| self.current.clone())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ConfigOptionKind {
+    Model,
+    Effort,
+}
+
 pub(super) struct AgentView {
     pub(super) config: AgentConfig,
     pub(super) name: String,
     pub(super) model: Option<String>,
+    pub(super) model_option: Option<ConfigSelectOption>,
+    pub(super) pending_model: Option<(u64, String)>,
+    pub(super) effort_option: Option<ConfigSelectOption>,
+    pub(super) pending_effort: Option<(u64, String)>,
     pub(super) context: Option<(u64, u64)>,
     pub(super) status: Status,
     pub(super) protocol: Option<ProtocolVersion>,
@@ -88,39 +121,77 @@ pub(super) fn agent_name(command: &[String]) -> String {
         .unwrap_or_else(|| "Agent".into())
 }
 
-pub(super) fn selected_model(config_options: &Value) -> Option<String> {
+pub(super) fn model_option(config_options: &Value) -> Option<ConfigSelectOption> {
     let option = config_options.as_array()?.iter().find(|option| {
-        option["category"].as_str() == Some("model") || option["id"].as_str() == Some("model")
+        option["category"].as_str() == Some("model")
+            || option["configId"].as_str() == Some("model")
+            || option["id"].as_str() == Some("model")
     })?;
+    parse_config_select_option(option)
+}
+
+pub(super) fn effort_option(config_options: &Value) -> Option<ConfigSelectOption> {
+    let option = config_options.as_array()?.iter().find(|option| {
+        let id = option["configId"]
+            .as_str()
+            .or_else(|| option["id"].as_str())
+            .unwrap_or_default();
+        option["category"].as_str() == Some("thought_level")
+            || id.contains("effort")
+            || (option["category"].as_str() == Some("model_config")
+                && option["name"]
+                    .as_str()
+                    .is_some_and(|name| name.to_lowercase().contains("reasoning")))
+    })?;
+    parse_config_select_option(option)
+}
+
+fn parse_config_select_option(option: &Value) -> Option<ConfigSelectOption> {
+    let id = option["configId"]
+        .as_str()
+        .or_else(|| option["id"].as_str())?;
     let current = option["currentValue"].as_str()?;
     let options = option["options"].as_array()?;
-    let choice = options
+    let choices = options
         .iter()
-        .find(|choice| choice["value"].as_str() == Some(current))
-        .or_else(|| {
-            options
-                .iter()
-                .flat_map(|group| group["options"].as_array().into_iter().flatten())
-                .find(|choice| choice["value"].as_str() == Some(current))
-        });
-    let Some(choice) = choice else {
-        return Some(current.to_owned());
-    };
-    if current == "default"
-        && let Some(description) = choice["description"].as_str()
-    {
-        return Some(
-            description
-                .split(" · ")
-                .next()
-                .unwrap_or(description)
-                .to_owned(),
-        );
-    }
-    choice["name"]
-        .as_str()
-        .map(str::to_owned)
-        .or_else(|| Some(current.to_owned()))
+        .flat_map(|entry| {
+            entry["options"]
+                .as_array()
+                .map_or_else(|| vec![entry], |group| group.iter().collect())
+        })
+        .filter_map(|choice| {
+            let value = choice["value"].as_str()?;
+            let label = if value == "default" && option["category"].as_str() == Some("model") {
+                choice["description"]
+                    .as_str()
+                    .and_then(|description| description.split(" · ").next())
+                    .or_else(|| choice["name"].as_str())
+            } else {
+                choice["name"].as_str()
+            }
+            .unwrap_or(value);
+            Some(ConfigChoice {
+                value: value.to_owned(),
+                label: label.to_owned(),
+            })
+        })
+        .collect();
+    Some(ConfigSelectOption {
+        id: id.to_owned(),
+        current: current.to_owned(),
+        choices,
+    })
+}
+
+pub(super) fn set_config_option_request(
+    id: u64,
+    session_id: &str,
+    option: &ConfigSelectOption,
+    value: &str,
+) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"session/set_config_option","params":{
+        "sessionId":session_id,"configId":option.id,"type":"id","value":value
+    }})
 }
 
 impl AgentView {
@@ -193,6 +264,10 @@ impl AgentView {
             config,
             name,
             model,
+            model_option: None,
+            pending_model: None,
+            effort_option: None,
+            pending_effort: None,
             context,
             status: Status::Connecting,
             protocol: None,

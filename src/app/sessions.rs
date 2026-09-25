@@ -14,7 +14,58 @@ fn initialize_params() -> Value {
     params
 }
 
+fn update_config_options(agent: &mut AgentView, options: &Value) {
+    if let Some(option) = model_option(options) {
+        agent.model = Some(option.label());
+        agent.model_option = Some(option);
+    } else {
+        agent.model_option = None;
+    }
+    agent.effort_option = effort_option(options);
+}
+
 impl Workspace {
+    pub(super) fn select_config_option(
+        &mut self,
+        project_index: usize,
+        agent_index: usize,
+        kind: ConfigOptionKind,
+        value: String,
+        cx: &mut Context<Self>,
+    ) {
+        let agent = &mut self.projects[project_index].agents[agent_index];
+        let option = match kind {
+            ConfigOptionKind::Model => &agent.model_option,
+            ConfigOptionKind::Effort => &agent.effort_option,
+        };
+        let Some(option) = option else {
+            return;
+        };
+        if agent.pending_model.is_some()
+            || agent.pending_effort.is_some()
+            || option.current == value
+            || !option.choices.iter().any(|choice| choice.value == value)
+        {
+            return;
+        }
+        let Some(session_id) = &agent.session_id else {
+            return;
+        };
+        let id = agent.next_request_id;
+        let request = set_config_option_request(id, session_id, option, &value);
+        match agent.send(request) {
+            Ok(()) => {
+                agent.next_request_id += 1;
+                match kind {
+                    ConfigOptionKind::Model => agent.pending_model = Some((id, value)),
+                    ConfigOptionKind::Effort => agent.pending_effort = Some((id, value)),
+                }
+            }
+            Err(error) => agent.log(Role::System, format!("Could not change setting: {error}")),
+        }
+        cx.notify();
+    }
+
     pub(super) fn reset_context(
         &mut self,
         project_index: usize,
@@ -317,6 +368,8 @@ impl Workspace {
                 Event::Disconnected { agent_id, reason } => {
                     if let Some((agent, _)) = self.agent_mut(agent_id) {
                         agent.awaiting_response = false;
+                        agent.pending_model = None;
+                        agent.pending_effort = None;
                         agent.cancel_requested = false;
                         agent.elicitations.clear();
                         agent.permissions.clear();
@@ -481,6 +534,48 @@ impl Workspace {
         let Some(id) = value.get("id").and_then(Value::as_u64) else {
             return;
         };
+        let config_kind = if agent
+            .pending_model
+            .as_ref()
+            .is_some_and(|(pending_id, _)| *pending_id == id)
+        {
+            Some(ConfigOptionKind::Model)
+        } else if agent
+            .pending_effort
+            .as_ref()
+            .is_some_and(|(pending_id, _)| *pending_id == id)
+        {
+            Some(ConfigOptionKind::Effort)
+        } else {
+            None
+        };
+        if let Some(kind) = config_kind {
+            let (_, selected) = match kind {
+                ConfigOptionKind::Model => agent.pending_model.take().unwrap(),
+                ConfigOptionKind::Effort => agent.pending_effort.take().unwrap(),
+            };
+            if let Some(error) = value.get("error") {
+                let message = error["message"].as_str().unwrap_or("unknown error");
+                agent.log(Role::System, format!("Could not change setting: {message}"));
+            } else if value["result"]["configOptions"].is_array() {
+                update_config_options(agent, &value["result"]["configOptions"]);
+            } else {
+                match kind {
+                    ConfigOptionKind::Model => {
+                        if let Some(option) = &mut agent.model_option {
+                            option.current = selected;
+                            agent.model = Some(option.label());
+                        }
+                    }
+                    ConfigOptionKind::Effort => {
+                        if let Some(option) = &mut agent.effort_option {
+                            option.current = selected;
+                        }
+                    }
+                }
+            }
+            return;
+        }
         if let Some(error) = value.get("error") {
             let message = error["message"].as_str().unwrap_or("unknown error");
             if id == 2 && agent.restoring.take().is_some() {
@@ -571,16 +666,14 @@ impl Workspace {
             }
             2 => {
                 if agent.restoring.take().is_some() {
-                    agent.model = selected_model(&value["result"]["configOptions"])
-                        .or_else(|| agent.model.clone());
+                    update_config_options(agent, &value["result"]["configOptions"]);
                     if agent.status == Status::Connecting {
                         agent.status = Status::Idle;
                     }
                 } else if let Some(session_id) = value["result"]["sessionId"].as_str() {
                     agent.session_id = Some(session_id.to_owned());
                     agent.config.session_id = agent.session_id.clone();
-                    agent.model = selected_model(&value["result"]["configOptions"])
-                        .or_else(|| agent.model.clone());
+                    update_config_options(agent, &value["result"]["configOptions"]);
                     agent.status = Status::Idle;
                 } else {
                     agent.status = Status::Error;
@@ -616,7 +709,7 @@ impl Workspace {
                 }
             }
             Some("config_option_update") => {
-                agent.model = selected_model(&update["configOptions"]);
+                update_config_options(agent, &update["configOptions"]);
             }
             Some("available_commands_update") => {
                 agent.config.available_commands = parse_available_commands(update);

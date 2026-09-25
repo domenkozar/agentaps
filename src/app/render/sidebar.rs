@@ -249,7 +249,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .bg(rgb(SIDEBAR))
-            .child(div().p_2().child(Input::new(&self.sidebar_search)))
+            .child(
+                div()
+                    .p_2()
+                    .child(Input::new(&self.sidebar_search).cleanable(true)),
+            )
             .child(
                 div()
                     .id("sidebar-scroll")
