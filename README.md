@@ -11,7 +11,7 @@ Agentaps is a Rust and GPUI desktop client for agents that speak the Agent Clien
 - **Session sidebar:** See each project's git branch and status, reorder rows by dragging, resize the sidebar, and archive sessions.
 - **Persistent chats:** Save projects, agents, chat history, and queued messages. On launch, reconnect agents and resume sessions when supported. If an agent cannot restore a session, keep the saved chat visible and start a new session.
 - **Context reset:** Start a fresh agent session in the same project while keeping earlier messages visible above a divider. Resetting stops the active turn and clears queued messages.
-- **Chat controls:** Send with **Enter**, insert a newline with **Ctrl+Enter**, stop an active turn, or queue messages while the agent works. Type `/` to find agent commands, use **Up/Down** to choose one, and complete it with **Tab** or **Enter**.
+- **Chat controls:** Send with **Enter**, insert a newline with **Ctrl+Enter**, stop an active turn, or queue messages while the agent works. Use **Up/Down** in the composer to recall earlier prompts. Type `/` to find agent commands, use **Up/Down** to choose one, and complete it with **Tab** or **Enter**.
 - **Structured questions:** Answer, decline, or cancel ACP form questions in conversation cards. A status dot and count show pending questions in the sidebar while the agent continues working.
 
 ## Run

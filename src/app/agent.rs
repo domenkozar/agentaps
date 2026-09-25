@@ -139,6 +139,7 @@ impl AgentView {
             messages,
             available_commands: Vec::new(),
             pending_prompts: Vec::new(),
+            prompt_history: self.config.prompt_history.clone(),
             was_working: false,
             session_has_activity: false,
         }
@@ -150,7 +151,16 @@ impl AgentView {
         }
     }
 
-    pub(super) fn new(config: AgentConfig) -> Self {
+    pub(super) fn new(mut config: AgentConfig) -> Self {
+        if config.prompt_history.is_empty() {
+            config.prompt_history = config
+                .messages
+                .iter()
+                .filter(|entry| entry.role == Role::User)
+                .map(|entry| entry.text.clone())
+                .chain(config.pending_prompts.iter().cloned())
+                .collect();
+        }
         let name = config
             .display_name
             .clone()
@@ -214,6 +224,7 @@ impl AgentView {
             messages: self.messages.clone(),
             available_commands: self.config.available_commands.clone(),
             pending_prompts: self.config.pending_prompts.clone(),
+            prompt_history: self.config.prompt_history.clone(),
             was_working: self.active_work,
             session_has_activity: self.config.session_has_activity || self.active_work,
         }

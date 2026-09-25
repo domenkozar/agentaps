@@ -205,6 +205,56 @@ struct ChatRow {
     signature: u64,
 }
 
+struct PromptRecall {
+    agent_id: u64,
+    index: usize,
+    draft: String,
+    displayed: String,
+}
+
+impl PromptRecall {
+    fn step(
+        state: &mut Option<Self>,
+        agent_id: u64,
+        history: &[String],
+        current: &str,
+        up: bool,
+    ) -> Option<String> {
+        if history.is_empty() {
+            return None;
+        }
+        if state
+            .as_ref()
+            .is_some_and(|recall| recall.agent_id != agent_id)
+        {
+            *state = None;
+        }
+        if state.is_none() {
+            if !up {
+                return None;
+            }
+            *state = Some(Self {
+                agent_id,
+                index: history.len(),
+                draft: current.to_owned(),
+                displayed: current.to_owned(),
+            });
+        }
+        let recall = state.as_mut().unwrap();
+        recall.index = if up {
+            recall.index.saturating_sub(1)
+        } else {
+            (recall.index + 1).min(history.len())
+        };
+        recall.displayed = if recall.index == history.len() {
+            recall.draft.clone()
+        } else {
+            history[recall.index].clone()
+        };
+        Some(recall.displayed.clone())
+    }
+}
+
 struct Workspace {
     projects: Vec<ProjectView>,
     view: WorkspaceView,
@@ -222,6 +272,7 @@ struct Workspace {
     picker_selection: usize,
     slash_selection: usize,
     slash_dismissed: bool,
+    prompt_recall: Option<PromptRecall>,
     picker_input: Entity<InputState>,
     sidebar_search: Entity<InputState>,
     composer: Entity<InputState>,
@@ -320,6 +371,9 @@ fn completed_slash_text(command: &SlashCommand) -> String {
 
 impl Workspace {
     fn set_view(&mut self, view: WorkspaceView) {
+        if self.view.displayed_session() != view.displayed_session() {
+            self.prompt_recall = None;
+        }
         self.view = view;
         self.mark_displayed_agent_viewed();
     }
@@ -369,6 +423,11 @@ impl Workspace {
                 window,
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
+                        if this.prompt_recall.as_ref().is_some_and(|recall| {
+                            recall.displayed != this.composer.read(cx).value().as_ref()
+                        }) {
+                            this.prompt_recall = None;
+                        }
                         this.slash_selection = 0;
                         this.slash_dismissed = false;
                         cx.notify();
@@ -446,6 +505,7 @@ impl Workspace {
             picker_selection: 0,
             slash_selection: 0,
             slash_dismissed: false,
+            prompt_recall: None,
             picker_input,
             sidebar_search,
             composer,
@@ -705,6 +765,7 @@ impl Workspace {
             messages: Vec::new(),
             available_commands: Vec::new(),
             pending_prompts: Vec::new(),
+            prompt_history: Vec::new(),
             was_working: false,
             session_has_activity: false,
         };
@@ -910,6 +971,9 @@ impl Workspace {
         }
         let commands = self.slash_results(cx);
         if commands.is_empty() {
+            if matches!(action, SlashAction::Up | SlashAction::Down) {
+                self.handle_prompt_recall(matches!(action, SlashAction::Up), window, cx);
+            }
             return;
         }
         match action {
@@ -927,6 +991,41 @@ impl Workspace {
                 self.slash_dismissed = true;
             }
         }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn handle_prompt_recall(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.view.displayed_session() else {
+            return;
+        };
+        let input = self.composer.read(cx);
+        let current = input.value().to_string();
+        let line = input.cursor_position().line as usize;
+        if (up && line != 0) || (!up && line < current.matches('\n').count()) {
+            return;
+        }
+        let agent = &self.projects[session.project_index].agents[session.agent_index];
+        let Some(value) = PromptRecall::step(
+            &mut self.prompt_recall,
+            agent.config.id,
+            &agent.config.prompt_history,
+            &current,
+            up,
+        ) else {
+            return;
+        };
+        let line = value.matches('\n').count() as u32;
+        let column = value
+            .rsplit('\n')
+            .next()
+            .unwrap_or("")
+            .encode_utf16()
+            .count() as u32;
+        self.composer.update(cx, |input, cx| {
+            input.set_value(value, window, cx);
+            input.set_cursor_position(Position::new(line, column), window, cx);
+        });
         cx.stop_propagation();
         cx.notify();
     }

@@ -55,6 +55,55 @@ fn archive_icons_are_bundled() {
     );
 }
 
+#[test]
+fn prompt_recall_walks_history_and_restores_draft() {
+    let history = vec!["first".into(), "second\nline".into()];
+    let mut recall = None;
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "draft", false),
+        None
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "draft", true),
+        Some("second\nline".into())
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "second\nline", true),
+        Some("first".into())
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "first", true),
+        Some("first".into())
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "first", false),
+        Some("second\nline".into())
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 7, &history, "second\nline", false),
+        Some("draft".into())
+    );
+    assert_eq!(
+        PromptRecall::step(&mut recall, 8, &history, "other draft", true),
+        Some("second\nline".into())
+    );
+    assert_eq!(recall.unwrap().draft, "other draft");
+}
+
+#[test]
+fn old_sessions_seed_prompt_history_from_messages_and_queue() {
+    let mut config = agent(ProtocolVersion::V2).snapshot();
+    config.prompt_history.clear();
+    config.messages.push(ChatEntry {
+        role: Role::User,
+        key: None,
+        text: "sent".into(),
+    });
+    config.pending_prompts.push("queued".into());
+    let restored = AgentView::new(config);
+    assert_eq!(restored.config.prompt_history, ["sent", "queued"]);
+}
+
 fn agent(protocol: ProtocolVersion) -> AgentView {
     let mut agent = AgentView::new(AgentConfig {
         id: 1,
@@ -67,6 +116,7 @@ fn agent(protocol: ProtocolVersion) -> AgentView {
         messages: Vec::new(),
         available_commands: Vec::new(),
         pending_prompts: Vec::new(),
+        prompt_history: Vec::new(),
         was_working: false,
         session_has_activity: false,
     });

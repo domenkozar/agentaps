@@ -95,21 +95,25 @@ impl Workspace {
             return;
         };
         if agent.active_work || !agent.config.pending_prompts.is_empty() {
+            agent.config.prompt_history.push(prompt.clone());
             agent.config.pending_prompts.push(prompt);
             self.dirty = true;
+            self.prompt_recall = None;
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.notice = None;
             cx.notify();
             return;
         }
-        match agent.start_prompt(prompt) {
+        match agent.start_prompt(prompt.clone()) {
             Ok(()) => {
+                agent.config.prompt_history.push(prompt);
                 self.chat_list.scroll_to(gpui::ListOffset {
                     item_ix: self.chat_list.item_count(),
                     offset_in_item: px(0.),
                 });
                 self.dirty = true;
+                self.prompt_recall = None;
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.notice = None;
