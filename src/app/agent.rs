@@ -123,6 +123,26 @@ pub(super) fn selected_model(config_options: &Value) -> Option<String> {
 }
 
 impl AgentView {
+    pub(super) fn reset_config(&self, id: u64, mut messages: Vec<ChatEntry>) -> AgentConfig {
+        for entry in &mut messages {
+            entry.key = None;
+        }
+        AgentConfig {
+            id,
+            command: self.config.command.clone(),
+            archived: self.config.archived,
+            display_name: self.config.display_name.clone(),
+            session_id: None,
+            model: None,
+            context: None,
+            messages,
+            available_commands: Vec::new(),
+            pending_prompts: Vec::new(),
+            was_working: false,
+            session_has_activity: false,
+        }
+    }
+
     pub(super) fn mark_viewed(&mut self) {
         if self.status == Status::Done {
             self.status = Status::Idle;

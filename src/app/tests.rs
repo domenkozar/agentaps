@@ -123,6 +123,57 @@ fn v1_prompt_response_still_completes_turn() {
 }
 
 #[test]
+fn resetting_context_reuses_agent_settings_without_reusing_session_state() {
+    let mut previous = agent(ProtocolVersion::V2);
+    previous.config.display_name = Some("Example agent".into());
+    previous.config.session_id = Some("session-1".into());
+    previous.config.pending_prompts.push("Queued work".into());
+    previous.model = Some("Example model".into());
+    previous.context = Some((42, 100));
+    previous.log(Role::User, "Earlier request");
+    previous.upsert_message(
+        Role::Agent,
+        "reply-1",
+        Some(&json!([{"type":"text","text":"Earlier reply"}])),
+        false,
+    );
+
+    let mut history = previous.messages.clone();
+    history.push(ChatEntry {
+        role: Role::ContextReset,
+        key: None,
+        text: "Context reset".into(),
+    });
+    let config = previous.reset_config(2, history);
+    assert_eq!(config.id, 2);
+    assert_eq!(config.command, previous.config.command);
+    assert_eq!(config.display_name, previous.config.display_name);
+    assert_eq!(config.session_id, None);
+    assert_eq!(config.model, None);
+    assert_eq!(config.context, None);
+    assert!(config.pending_prompts.is_empty());
+    assert!(!config.session_has_activity);
+
+    let saved = serde_json::to_vec(&config).unwrap();
+    let mut reset = AgentView::new(serde_json::from_slice(&saved).unwrap());
+    assert_eq!(reset.status, Status::Connecting);
+    assert_eq!(reset.session_id, None);
+    assert_eq!(reset.messages.len(), 3);
+    assert_eq!(reset.messages[2].role, Role::ContextReset);
+    assert!(reset.messages.iter().all(|entry| entry.key.is_none()));
+    reset.upsert_message(
+        Role::Agent,
+        "reply-1",
+        Some(&json!([{"type":"text","text":"New reply"}])),
+        false,
+    );
+    assert_eq!(reset.messages.len(), 4);
+    assert_eq!(reset.messages[1].text, "Earlier reply");
+    assert_eq!(reset.messages[3].text, "New reply");
+    assert_eq!(previous.messages.len(), 2);
+}
+
+#[test]
 fn sidebar_drag_moves_in_both_directions() {
     let mut order = vec![1, 2, 3, 4];
     assert!(move_sidebar_id(&mut order, 1, 3));

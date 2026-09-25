@@ -20,6 +20,8 @@ The development environment provides Rust, the native libraries GPUI needs, and 
 
 Each sidebar row shows a project, its git branch, and a status dot. Hover over the dot for the state. Drag rows to reorder them or drag the divider to resize the sidebar. Hover over a row to reveal its archive icon; **Archive** at the bottom shows archived sessions.
 
+To start with fresh context in the same agent row, click **Reset context** in the conversation header. This starts a new agent session in the same project. Earlier messages remain visible above a divider, but the agent no longer has them in context. Resetting stops any active turn and clears queued messages.
+
 In chat, **Enter** sends and **Ctrl+Enter** inserts a newline. Type `/` for commands advertised by the current agent, use **Up/Down** to choose one, and press **Tab** or **Enter** to complete it. While the agent works, the square Stop icon cancels the current turn. You can send more messages during a turn; Agentaps queues them and sends them in order.
 
 ## Agents

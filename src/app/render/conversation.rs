@@ -77,6 +77,36 @@ impl Workspace {
                 .when(
                     agent.model.is_some() || agent.context.is_some(),
                     |element| element.child(metadata),
+                )
+                .child(
+                    div()
+                        .id("reset-context")
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .text_sm()
+                        .text_color(rgb(TEXT))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(HOVER)))
+                        .child(
+                            Icon::new(IconName::Redo2)
+                                .size(px(14.))
+                                .text_color(rgb(TEXT)),
+                        )
+                        .child("Reset context")
+                        .tooltip(|window, cx| {
+                            Tooltip::new("Start fresh here. Earlier messages stay visible.")
+                                .build(window, cx)
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.reset_context(project_index, agent_index, cx);
+                        })),
                 ),
         );
         let view = cx.entity().clone();

@@ -211,6 +211,23 @@ impl Workspace {
                             .child(content),
                     )
             }
+            Role::ContextReset => div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap_3()
+                .py_2()
+                .child(div().flex_1().h(px(1.)).bg(rgb(BORDER)))
+                .child(
+                    div()
+                        .max_w(relative(0.8))
+                        .text_center()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .whitespace_normal()
+                        .child(entry.text.clone()),
+                )
+                .child(div().flex_1().h(px(1.)).bg(rgb(BORDER))),
             role => {
                 let (label, color) = match role {
                     Role::Thought => ("THOUGHT", MUTED),

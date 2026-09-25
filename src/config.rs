@@ -14,6 +14,7 @@ pub enum Role {
     Thought,
     Tool,
     System,
+    ContextReset,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

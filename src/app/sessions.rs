@@ -1,6 +1,39 @@
 use super::*;
 
 impl Workspace {
+    pub(super) fn reset_context(
+        &mut self,
+        project_index: usize,
+        agent_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let old_id = self.projects[project_index].agents[agent_index].config.id;
+        let new_id = self.next_agent_id;
+        self.next_agent_id += 1;
+        let agent = &self.projects[project_index].agents[agent_index];
+        let mut messages = agent.messages.clone();
+        messages.push(ChatEntry {
+            role: Role::ContextReset,
+            key: None,
+            text: "Context reset. Earlier messages are visible, but the agent no longer has them in context.".into(),
+        });
+        let config = agent.reset_config(new_id, messages);
+        self.projects[project_index].agents[agent_index] = AgentView::new(config);
+        if let Some(id) = self.sidebar_order.iter_mut().find(|id| **id == old_id) {
+            *id = new_id;
+        } else {
+            self.sidebar_order.push(new_id);
+        }
+        self.collapsed_tool_groups.retain(|(id, _)| *id != old_id);
+        self.expanded_tool_rows.retain(|(id, _)| *id != old_id);
+        self.chat_list_agent = None;
+        self.chat_rows.clear();
+        self.connect(project_index, agent_index);
+        self.notice = None;
+        self.persist();
+        cx.notify();
+    }
+
     pub(super) fn connect(&mut self, project_index: usize, agent_index: usize) {
         let project = &mut self.projects[project_index];
         let agent = &mut project.agents[agent_index];
