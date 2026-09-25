@@ -4,6 +4,8 @@ Notable changes to Agentaps are recorded here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
 ### Changed
 
 - Diff views refresh automatically as checkout changes arrive.
@@ -38,5 +40,6 @@ Notable changes to Agentaps are recorded here.
 - Added chat controls for queued messages, stopping turns, resetting agent context, and completing agent slash commands.
 - Added ACP form questions with answer, decline, and cancel actions.
 
-[Unreleased]: https://github.com/domenkozar/agentaps/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/domenkozar/agentaps/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/domenkozar/agentaps/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/domenkozar/agentaps/tree/v0.1.0
