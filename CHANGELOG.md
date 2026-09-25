@@ -6,6 +6,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Documentation
 
+- Updated the README screenshot to show the current session interface.
 - Added a tagline that captures Agentaps' direction across work environments.
 
 ### Added
