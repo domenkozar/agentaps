@@ -12,10 +12,10 @@ a:focus-visible { outline: 2px solid #79dbc8; outline-offset: 4px; }
 .site-header { height: 88px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(165, 195, 199, .12); }
 .brand { display: inline-flex; gap: 11px; align-items: center; font: 700 24px/1 'IBM Plex Sans', sans-serif; letter-spacing: -.07em; }
 .brand-dot, .phone-brand span { color: #76d8c4; }
-.brand-mark { position: relative; display: inline-flex; align-items: end; gap: 3px; width: 31px; height: 31px; padding: 6px; border: 1px solid rgba(123, 219, 200, .45); border-radius: 10px; background: #183332; transform: rotate(-8deg); }
-.brand-mark span { width: 5px; height: 15px; border-radius: 4px; background: #7de0c9; transform: skew(-28deg); }
-.brand-mark span:nth-child(2) { height: 10px; opacity: .7; }
-.brand-mark span:nth-child(3) { height: 14px; opacity: .45; }
+.brand-mark { position: relative; display: inline-flex; align-items: end; justify-content: center; gap: 2px; width: 33px; height: 33px; padding: 4px; border: 1px solid rgba(123, 219, 200, .45); border-radius: 10px; background: #183332; }
+.brand-mark span { width: 5px; height: 22px; border-radius: 3px; background: #7de0c9; }
+.brand-mark span:nth-child(2) { height: 15px; opacity: .7; }
+.brand-mark span:nth-child(3) { height: 19px; opacity: .45; }
 .site-header nav { display: flex; align-items: center; gap: 36px; font-size: 14px; font-weight: 600; color: #adbdc0; }
 .site-header nav a:hover, .site-footer a:hover, .source-link a:hover { color: #8fe8d4; }
 .site-header nav .nav-connect { padding: 11px 15px; border: 1px solid rgba(128, 219, 201, .32); border-radius: 9px; color: #d6f4ee; background: rgba(38, 86, 79, .18); }
