@@ -20,6 +20,10 @@ Notable changes to Agentaps are recorded here.
 
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
 
+### Fixed
+
+- Diff review opens promptly and shows loading progress while checkout changes are read.
+
 ## [0.2.1] - 2026-09-25
 
 ### Changed

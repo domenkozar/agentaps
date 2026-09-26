@@ -323,6 +323,8 @@ struct Workspace {
     diff_request_id: u64,
     diff_watch_tx: Sender<u64>,
     diff_watch_rx: Receiver<u64>,
+    diff_watcher_tx: Sender<(u64, notify::Result<notify::RecommendedWatcher>)>,
+    diff_watcher_rx: Receiver<(u64, notify::Result<notify::RecommendedWatcher>)>,
     diff_watch_generation: u64,
     diff_watcher: Option<notify::RecommendedWatcher>,
     diff_refresh_due: Option<Instant>,
@@ -455,17 +457,19 @@ impl Workspace {
         self.diff_rows = Arc::new(Vec::new());
         self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
         self.diff_watch_generation += 1;
-        let path = &self.projects[project_index].path;
-        self.diff_watcher =
-            crate::diff_watch::start(path, self.diff_watch_generation, self.diff_watch_tx.clone())
-                .ok();
-        self.diff_poll_at = self
-            .diff_watcher
-            .is_none()
-            .then(|| Instant::now() + Duration::from_secs(3));
+        let generation = self.diff_watch_generation;
+        let path = self.projects[project_index].path.clone();
+        let watch_tx = self.diff_watch_tx.clone();
+        let watcher_tx = self.diff_watcher_tx.clone();
+        self.diff_watcher = None;
+        self.diff_poll_at = None;
         self.diff_refresh_due = None;
         self.diff_first_change_at = None;
         self.refresh_diff(project_index, cx);
+        std::thread::spawn(move || {
+            let watcher = crate::diff_watch::start(&path, generation, watch_tx);
+            let _ = watcher_tx.send((generation, watcher));
+        });
     }
 
     fn close_diff(&mut self) {
@@ -617,6 +621,7 @@ impl Workspace {
         let (events_tx, events_rx) = mpsc::channel();
         let (diff_tx, diff_rx) = mpsc::channel();
         let (diff_watch_tx, diff_watch_rx) = mpsc::channel();
+        let (diff_watcher_tx, diff_watcher_rx) = mpsc::channel();
         let (config, migrate_config, notice) = match config::load() {
             Ok((config, migrate)) => (config, migrate, None),
             Err(error) => (
@@ -715,6 +720,8 @@ impl Workspace {
             diff_request_id: 0,
             diff_watch_tx,
             diff_watch_rx,
+            diff_watcher_tx,
+            diff_watcher_rx,
             diff_watch_generation: 0,
             diff_watcher: None,
             diff_refresh_due: None,

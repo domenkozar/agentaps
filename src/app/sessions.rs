@@ -335,6 +335,14 @@ impl Workspace {
             }
             cx.notify();
         }
+        while let Ok((generation, watcher)) = self.diff_watcher_rx.try_recv() {
+            if self.diff_visible && generation == self.diff_watch_generation {
+                self.diff_watcher = watcher.ok();
+                if self.diff_watcher.is_none() {
+                    self.diff_poll_at = Some(Instant::now() + Duration::from_secs(3));
+                }
+            }
+        }
         let mut watched_change = false;
         while let Ok(generation) = self.diff_watch_rx.try_recv() {
             watched_change |= self.diff_visible && generation == self.diff_watch_generation;

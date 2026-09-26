@@ -1,5 +1,6 @@
 use super::*;
 use crate::diff_view::{self, Presentation};
+use gpui_component::progress::Progress;
 
 impl Workspace {
     pub(super) fn render_diff(
@@ -108,6 +109,26 @@ impl Workspace {
             );
         }
         panel = panel.child(toolbar);
+        if self.diff_loading {
+            panel = panel.child(
+                div()
+                    .px_4()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(rgb(BORDER))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(rgb(MUTED))
+                    .child("Loading changes…")
+                    .child(
+                        Progress::new("diff-loading")
+                            .loading(true)
+                            .accessibility_label("Loading checkout changes"),
+                    ),
+            );
+        }
         let body = if let Some(error) = &self.diff_error {
             div()
                 .flex_1()
@@ -116,12 +137,7 @@ impl Workspace {
                 .child(format!("Could not load diff: {error}"))
                 .into_any_element()
         } else if self.diff_loading && self.diff_files.is_empty() {
-            div()
-                .flex_1()
-                .p_4()
-                .text_color(rgb(MUTED))
-                .child("Loading changes…")
-                .into_any_element()
+            div().flex_1().into_any_element()
         } else if self.diff_files.is_empty() {
             div()
                 .flex_1()
