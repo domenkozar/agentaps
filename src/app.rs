@@ -2,6 +2,7 @@ use crate::acp::{Connection, Event};
 use crate::config::{AgentConfig, ChatEntry, Config, ProjectConfig, Role, SlashCommand};
 use crate::diff_view::{File as DiffFile, Presentation as DiffPresentation, Row as DiffRow};
 use crate::discovery::{AgentChoice, discover_folders, installed_agents, score};
+use crate::file_search::{FileSearch, scan_project};
 use crate::folder_search::{FolderSearch, inject_path};
 use crate::theme::*;
 use crate::{config, theme};
@@ -188,6 +189,71 @@ enum SlashAction {
     Dismiss,
 }
 
+fn cursor_byte_offset(text: &str, position: Position) -> usize {
+    let mut offset = 0;
+    for (line, content) in text.split_inclusive('\n').enumerate() {
+        if line == position.line as usize {
+            let mut column = 0;
+            for (index, character) in content.char_indices() {
+                if column >= position.character as usize {
+                    return offset + index;
+                }
+                column += character.len_utf16();
+            }
+            return offset + content.len();
+        }
+        offset += content.len();
+    }
+    text.len()
+}
+
+fn file_mention(text: &str, cursor: Position) -> Option<(std::ops::Range<usize>, &str)> {
+    let end = cursor_byte_offset(text, cursor);
+    let before = &text[..end];
+    let token_start = before
+        .rmatch_indices(char::is_whitespace)
+        .next()
+        .map_or(0, |(index, whitespace)| index + whitespace.len());
+    let token = &before[token_start..];
+    let at = token.rfind('@')? + token_start;
+    if at > 0
+        && !text[..at]
+            .chars()
+            .last()
+            .is_some_and(|c| c.is_whitespace() || matches!(c, '(' | '[' | '{' | '"' | '\''))
+    {
+        return None;
+    }
+    let rest = &text[end..];
+    let suffix_len = rest
+        .find(|character: char| {
+            character.is_whitespace() || matches!(character, ',' | ')' | ']' | '}' | '"' | '\'')
+        })
+        .unwrap_or(rest.len());
+    Some((at..end + suffix_len, &text[at + 1..end]))
+}
+
+fn completed_file_text(
+    text: &str,
+    range: std::ops::Range<usize>,
+    file: &str,
+) -> (String, Position) {
+    let following_space = text[range.end..].starts_with(' ');
+    let replacement = format!("@{file}{}", if following_space { "" } else { " " });
+    let mut completed = text.to_owned();
+    completed.replace_range(range.start..range.end, &replacement);
+    let cursor = range.start + replacement.len() + usize::from(following_space);
+    let before = &completed[..cursor];
+    let line = before.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let column = before
+        .rsplit('\n')
+        .next()
+        .unwrap_or("")
+        .encode_utf16()
+        .count() as u32;
+    (completed, Position::new(line, column))
+}
+
 struct ProjectView {
     path: PathBuf,
     branch: String,
@@ -301,6 +367,13 @@ struct Workspace {
     folders_rx: Receiver<Vec<PathBuf>>,
     folder_search: FolderSearch,
     folder_scan_complete: bool,
+    file_search: Option<FileSearch>,
+    file_search_project: Option<usize>,
+    file_scan_tx: Sender<u64>,
+    file_scan_rx: Receiver<u64>,
+    file_scan_generation: u64,
+    file_selection: usize,
+    file_dismissed: bool,
     available_agents: Vec<AgentChoice>,
     picker_selection: usize,
     sidebar_selection: usize,
@@ -439,6 +512,27 @@ impl Workspace {
             self.diff_files.clear();
             self.diff_rows = Arc::new(Vec::new());
             self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
+        }
+        let project_index = view
+            .displayed_session()
+            .map(|session| session.project_index);
+        if self.file_search_project != project_index {
+            self.file_search_project = project_index;
+            self.file_scan_generation += 1;
+            let generation = self.file_scan_generation;
+            self.file_selection = 0;
+            self.file_dismissed = false;
+            self.file_search = project_index.map(|index| {
+                let search = FileSearch::new();
+                let injector = search.injector();
+                let root = self.projects[index].path.clone();
+                let sender = self.file_scan_tx.clone();
+                std::thread::spawn(move || {
+                    scan_project(&root, &injector);
+                    let _ = sender.send(generation);
+                });
+                search
+            });
         }
         if matches!(self.view, WorkspaceView::Archive { .. })
             != matches!(view, WorkspaceView::Archive { .. })
@@ -608,6 +702,9 @@ impl Workspace {
                         }
                         this.slash_selection = 0;
                         this.slash_dismissed = false;
+                        this.file_selection = 0;
+                        this.file_dismissed = false;
+                        this.update_file_query(cx);
                         cx.notify();
                     }
                     InputEvent::PressEnter {
@@ -619,6 +716,7 @@ impl Workspace {
             ),
         ];
         let (events_tx, events_rx) = mpsc::channel();
+        let (file_scan_tx, file_scan_rx) = mpsc::channel();
         let (diff_tx, diff_rx) = mpsc::channel();
         let (diff_watch_tx, diff_watch_rx) = mpsc::channel();
         let (diff_watcher_tx, diff_watcher_rx) = mpsc::channel();
@@ -698,6 +796,13 @@ impl Workspace {
             folders_rx,
             folder_search,
             folder_scan_complete: false,
+            file_search: None,
+            file_search_project: None,
+            file_scan_tx,
+            file_scan_rx,
+            file_scan_generation: 0,
+            file_selection: 0,
+            file_dismissed: false,
             available_agents: installed_agents(),
             picker_selection: 0,
             sidebar_selection: 0,
@@ -820,6 +925,17 @@ impl Workspace {
                             cx.notify();
                         }
                         if this.folder_search.tick() {
+                            cx.notify();
+                        }
+                        while let Ok(generation) = this.file_scan_rx.try_recv() {
+                            if this.file_scan_generation == generation
+                                && let Some(search) = this.file_search.as_mut()
+                            {
+                                search.scan_complete();
+                                cx.notify();
+                            }
+                        }
+                        if this.file_search.as_mut().is_some_and(FileSearch::tick) {
                             cx.notify();
                         }
                         ticks += 1;
@@ -1312,6 +1428,53 @@ impl Workspace {
         )
     }
 
+    fn update_file_query(&mut self, cx: &Context<Self>) {
+        let input = self.composer.read(cx);
+        let draft = input.value().to_string();
+        let query = file_mention(&draft, input.cursor_position()).map(|(_, query)| query);
+        if let (Some(search), Some(query)) = (self.file_search.as_mut(), query) {
+            search.set_query(query);
+        }
+    }
+
+    fn file_results(&self, cx: &Context<Self>) -> Vec<String> {
+        if self.file_dismissed || self.view.displayed_session().is_none() {
+            return Vec::new();
+        }
+        let input = self.composer.read(cx);
+        let draft = input.value().to_string();
+        let Some((_, query)) = file_mention(&draft, input.cursor_position()) else {
+            return Vec::new();
+        };
+        self.file_search
+            .as_ref()
+            .filter(|search| search.query() == query)
+            .map_or_else(Vec::new, |search| search.results().to_vec())
+    }
+
+    fn file_mention_active(&self, cx: &Context<Self>) -> bool {
+        if self.file_dismissed || self.view.displayed_session().is_none() {
+            return false;
+        }
+        let input = self.composer.read(cx);
+        file_mention(&input.value(), input.cursor_position()).is_some()
+    }
+
+    fn complete_file(&mut self, file: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.composer.read(cx);
+        let draft = input.value().to_string();
+        let Some((range, _)) = file_mention(&draft, input.cursor_position()) else {
+            return;
+        };
+        let (value, cursor) = completed_file_text(&draft, range, file);
+        self.composer.update(cx, |input, cx| {
+            input.replace_all(value, window, cx);
+            input.set_cursor_position(cursor, window, cx);
+        });
+        self.file_dismissed = true;
+        cx.notify();
+    }
+
     fn complete_slash_command(
         &mut self,
         command: SlashCommand,
@@ -1336,6 +1499,36 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let files = self.file_results(cx);
+        if !files.is_empty() {
+            match action {
+                SlashAction::Down => self.file_selection = (self.file_selection + 1) % files.len(),
+                SlashAction::Up => {
+                    self.file_selection = (self.file_selection + files.len() - 1) % files.len()
+                }
+                SlashAction::Complete => {
+                    let index = self.file_selection.min(files.len() - 1);
+                    self.complete_file(&files[index], window, cx);
+                }
+                SlashAction::Dismiss => self.file_dismissed = true,
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if self.file_mention_active(cx)
+            && matches!(
+                action,
+                SlashAction::Up | SlashAction::Down | SlashAction::Dismiss
+            )
+        {
+            if matches!(action, SlashAction::Dismiss) {
+                self.file_dismissed = true;
+                cx.notify();
+            }
+            cx.stop_propagation();
             return;
         }
         let commands = self.slash_results(cx);
@@ -1365,6 +1558,10 @@ impl Workspace {
     }
 
     fn handle_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.file_mention_active(cx) {
+            self.handle_slash_action(SlashAction::Dismiss, window, cx);
+            return;
+        }
         if !matches!(self.view, WorkspaceView::NewSession { .. })
             && let Some(SessionLocation {
                 project_index,

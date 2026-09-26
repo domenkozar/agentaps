@@ -11,6 +11,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Added
 
+- Typing `@` in a prompt offers fuzzy file path completion from the current project.
 - Search fields show a clear button while typing, and Escape clears the current search.
 - Session headers let you choose from models offered by the connected agent.
 - Session headers let you start a new session with another coding agent in the same project.
@@ -22,6 +23,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Fixed
 
+- File path completion adds a space and closes its suggestion menu.
 - Diff review opens promptly and shows loading progress while checkout changes are read.
 
 ## [0.2.1] - 2026-09-25

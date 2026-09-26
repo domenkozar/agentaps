@@ -397,6 +397,54 @@ impl Workspace {
                     }),
             );
         }
+        let file_results = self.file_results(cx);
+        if self.file_mention_active(cx) {
+            let mut menu = div()
+                .mx_4()
+                .mb_1()
+                .p_1()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(SURFACE))
+                .flex()
+                .flex_col();
+            if file_results.is_empty() {
+                menu = menu.child(div().px_3().py_2().text_sm().text_color(rgb(MUTED)).child(
+                    if self.file_search.as_ref().is_some_and(FileSearch::loading) {
+                        "Looking for files…"
+                    } else {
+                        "No matching files"
+                    },
+                ));
+            }
+            for (index, file) in file_results.into_iter().enumerate() {
+                let name = file.clone();
+                menu = menu.child(
+                    div()
+                        .id(("file-mention", index))
+                        .cursor_pointer()
+                        .rounded_md()
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .when(index == self.file_selection, |row| row.bg(rgb(SELECTED)))
+                        .hover(|style| style.bg(rgb(SELECTED)))
+                        .child(
+                            Icon::new(IconName::File)
+                                .size(px(16.))
+                                .text_color(rgb(ACCENT)),
+                        )
+                        .child(div().min_w(px(0.)).truncate().text_sm().child(name))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.complete_file(&file, window, cx);
+                        })),
+                );
+            }
+            chat = chat.child(menu);
+        }
         let slash_commands = self.slash_results(cx);
         if !slash_commands.is_empty() {
             let mut menu = div()

@@ -436,6 +436,35 @@ fn session_history_survives_config_round_trip() {
 }
 
 #[test]
+fn file_mention_completes_at_cursor_without_changing_surrounding_text() {
+    let draft = "Check 🦀 @src/ma and @other";
+    let cursor = Position::new(0, "Check 🦀 @src/ma".encode_utf16().count() as u32);
+    let (range, query) = file_mention(draft, cursor).unwrap();
+    assert_eq!(query, "src/ma");
+    let (completed, position) = completed_file_text(draft, range, "src/main.rs");
+    assert_eq!(completed, "Check 🦀 @src/main.rs and @other");
+    assert_eq!(
+        position.character,
+        "Check 🦀 @src/main.rs ".encode_utf16().count() as u32
+    );
+    assert!(file_mention(&completed, position).is_none());
+    let draft = "Review @src/main soon";
+    let cursor = Position::new(0, "Review @src/ma".encode_utf16().count() as u32);
+    let (range, query) = file_mention(draft, cursor).unwrap();
+    assert_eq!(query, "src/ma");
+    let (completed, position) = completed_file_text(draft, range, "src/main.rs");
+    assert_eq!(completed, "Review @src/main.rs soon");
+    assert!(file_mention(&completed, position).is_none());
+    let draft = "Review @src/ma";
+    let cursor = Position::new(0, draft.encode_utf16().count() as u32);
+    let (range, _) = file_mention(draft, cursor).unwrap();
+    let (completed, position) = completed_file_text(draft, range, "src/main.rs");
+    assert_eq!(completed, "Review @src/main.rs ");
+    assert!(file_mention(&completed, position).is_none());
+    assert!(file_mention("email@example.com", Position::new(0, 17)).is_none());
+}
+
+#[test]
 fn slash_commands_follow_agent_snapshots_and_complete_with_input_hint() {
     let mut agent = agent(ProtocolVersion::V1);
     Workspace::handle_update(
