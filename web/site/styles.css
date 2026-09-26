@@ -37,7 +37,11 @@ h1 span { color: #8fc5ec; }
 .button-primary:hover { background: #b6dcf4; }
 .button-secondary { border: 1px solid #334253; color: #edf2f7; background: #202a36; }
 .button-secondary:hover { border-color: #8fc5ec; background: #293747; }
-.hero-note { margin: 23px 0 0; color: #8193a5; font-size: 12px; }
+.hero-platforms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 23px 0 0; color: #9aaaba; font-size: 12px; }
+.hero-platforms span { margin-right: 4px; }
+.hero-platforms a { padding: 6px 9px; border: 1px solid #334253; border-radius: 6px; color: #edf2f7; background: #202a36; }
+.hero-platforms a:hover { border-color: #8fc5ec; }
+.hero-note { margin: 12px 0 0; color: #8193a5; font-size: 12px; }
 .product-visual { position: relative; height: 550px; display: flex; align-items: center; margin-right: -46px; }
 .visual-glow { position: absolute; inset: 16% 3% 5% 10%; border-radius: 50%; filter: blur(55px); background: radial-gradient(ellipse, rgba(79, 139, 196, .24), rgba(87, 110, 179, .1) 55%, transparent 75%); }
 .desktop-window { position: relative; width: 650px; height: 408px; border: 1px solid #334253; border-radius: 13px; overflow: hidden; background: #10151c; box-shadow: 0 32px 100px rgba(0,0,0,.45), 0 0 0 7px rgba(143, 197, 236, .04); transform: perspective(1100px) rotateY(-5deg) rotateX(2deg); }
