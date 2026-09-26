@@ -12,6 +12,7 @@ fn text_signature(text: &str, hasher: &mut impl Hasher) {
 fn chat_rows(
     agent: &AgentView,
     collapsed_tool_groups: &HashSet<(u64, usize)>,
+    expanded_tool_history: &HashSet<(u64, usize)>,
     expanded_tool_rows: &HashSet<(u64, usize)>,
 ) -> Vec<ChatRow> {
     let mut rows = Vec::new();
@@ -28,6 +29,9 @@ fn chat_rows(
         if entry.role == Role::Tool {
             let end = tool_run_end(&agent.messages, index);
             collapsed_tool_groups
+                .contains(&(agent.config.id, index))
+                .hash(&mut hasher);
+            expanded_tool_history
                 .contains(&(agent.config.id, index))
                 .hash(&mut hasher);
             for (offset, tool) in agent.messages[index..end].iter().enumerate() {
@@ -118,7 +122,12 @@ fn changed_row_range(old: &[ChatRow], new: &[ChatRow]) -> Option<(Range<usize>, 
 impl Workspace {
     pub(super) fn sync_chat_rows(&mut self, project_index: usize, agent_index: usize) {
         let agent = &self.projects[project_index].agents[agent_index];
-        let rows = chat_rows(agent, &self.collapsed_tool_groups, &self.expanded_tool_rows);
+        let rows = chat_rows(
+            agent,
+            &self.collapsed_tool_groups,
+            &self.expanded_tool_history,
+            &self.expanded_tool_rows,
+        );
 
         if self.chat_list_agent != Some(agent.config.id) {
             self.chat_list.reset(rows.len());
@@ -589,24 +598,32 @@ mod tests {
         agent.log(Role::Tool, "Read file");
         agent.log(Role::Agent, "Answer");
         let collapsed = HashSet::new();
+        let history = HashSet::new();
         let expanded = HashSet::new();
-        let before = chat_rows(&agent, &collapsed, &expanded);
+        let before = chat_rows(&agent, &collapsed, &history, &expanded);
         assert_eq!(before.len(), 3);
         assert_eq!(before[1].kind, ChatRowKind::Tools(1, 3));
 
         agent.messages[0].text.push('!');
-        let after = chat_rows(&agent, &collapsed, &expanded);
+        let after = chat_rows(&agent, &collapsed, &history, &expanded);
         assert_eq!(changed_row_range(&before, &after), Some((0..1, 1)));
         assert_eq!(changed_row_range(&after, &after), None);
 
         let collapsed = HashSet::from([(agent.config.id, 1)]);
-        let collapsed_rows = chat_rows(&agent, &collapsed, &expanded);
+        let collapsed_rows = chat_rows(&agent, &collapsed, &history, &expanded);
         assert_eq!(changed_row_range(&after, &collapsed_rows), Some((1..2, 1)));
 
-        agent.config.pending_prompts.push("Next".into());
-        let queued_rows = chat_rows(&agent, &collapsed, &expanded);
+        let history = HashSet::from([(agent.config.id, 1)]);
+        let history_rows = chat_rows(&agent, &collapsed, &history, &expanded);
         assert_eq!(
-            changed_row_range(&collapsed_rows, &queued_rows),
+            changed_row_range(&collapsed_rows, &history_rows),
+            Some((1..2, 1))
+        );
+
+        agent.config.pending_prompts.push("Next".into());
+        let queued_rows = chat_rows(&agent, &collapsed, &history, &expanded);
+        assert_eq!(
+            changed_row_range(&history_rows, &queued_rows),
             Some((3..3, 1))
         );
     }

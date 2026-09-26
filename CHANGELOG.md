@@ -23,6 +23,7 @@ Notable changes to Agentaps are recorded here.
 
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
 - Dragging an agent in the sidebar shows a horizontal line at its drop position.
+- Tool activity highlights the current step, groups completed steps, and describes checks and tests in plain language.
 
 ### Fixed
 

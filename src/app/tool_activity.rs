@@ -167,8 +167,30 @@ pub(super) fn simple_tool_description(script: &str) -> (String, bool) {
         "git" => match rest.first().map(String::as_str) {
             Some("status") => ("Check git status".into(), true),
             Some("log") => ("Inspect git history".into(), true),
+            Some("diff") if rest.iter().any(|arg| arg == "--check") => {
+                ("Check patch whitespace".into(), true)
+            }
             Some("diff") => ("Review changes".into(), true),
             Some("show") => ("Inspect commit".into(), true),
+            _ => (script.to_owned(), false),
+        },
+        "cargo" => match rest.first().map(String::as_str) {
+            Some("fmt") if rest.iter().any(|arg| arg == "--check") => {
+                ("Check formatting".into(), true)
+            }
+            Some("fmt") => ("Format code".into(), true),
+            Some("test") => {
+                let targeted = rest.iter().skip(1).any(|arg| !arg.starts_with('-'));
+                (
+                    if targeted {
+                        "Run targeted test"
+                    } else {
+                        "Run tests"
+                    }
+                    .into(),
+                    true,
+                )
+            }
             _ => (script.to_owned(), false),
         },
         "wc" => ("Count output".into(), true),
@@ -213,23 +235,83 @@ pub(super) fn tool_description(text: &str) -> (String, bool) {
     if labels.is_empty() {
         return ("Inspect folder".into(), true);
     }
-    let remaining = labels.len().saturating_sub(2);
-    let mut summary = labels.into_iter().take(2).collect::<Vec<_>>().join(" · ");
-    if remaining > 0 {
-        summary.push_str(&format!(" · {remaining} more"));
+    if labels.len() > 2 {
+        let label = if labels.iter().all(|label| label.starts_with("Read ")) {
+            format!("Read files ({} steps)", labels.len())
+        } else {
+            format!("Inspect project ({} steps)", labels.len())
+        };
+        return (label, true);
     }
-    (summary, true)
+    (labels.join(" · "), true)
 }
 
-pub(super) fn tool_group_heading(entries: &[ChatEntry]) -> &'static str {
-    let has_action = entries
+pub(super) fn tool_group_heading(entries: &[ChatEntry]) -> String {
+    let has_specific_action = entries
         .iter()
         .any(|entry| !is_approval_review(&entry.text) && !is_generic_tool_title(&entry.text));
-    if !has_action && entries.iter().any(|entry| is_approval_review(&entry.text)) {
-        "Approval checks"
-    } else {
-        "Ran"
+    let approval_only =
+        !has_specific_action && entries.iter().all(|entry| is_approval_review(&entry.text));
+    let mut all_completed = true;
+    let mut current = None;
+    let mut pending = None;
+    let mut failed = None;
+    for entry in entries {
+        let status = tool_title_and_status(&entry.text).1;
+        all_completed &= status == Some("completed");
+        match status {
+            Some("in_progress") => current = Some(entry),
+            Some("pending") => pending = Some(entry),
+            Some("failed") => failed = Some(entry),
+            _ => {}
+        }
     }
+    if let Some(entry) = failed {
+        return format!("Needs attention · {}", group_step_description(entry));
+    }
+    if let Some(entry) = current {
+        return format!("Working · {}", ongoing_tool_description(entry));
+    }
+    if let Some(entry) = pending {
+        return format!("Waiting · {}", group_step_description(entry));
+    }
+    if all_completed && !entries.is_empty() {
+        if approval_only {
+            "Approval checks".into()
+        } else {
+            "Completed".into()
+        }
+    } else if approval_only {
+        "Approval checks".into()
+    } else {
+        "Activity".into()
+    }
+}
+
+fn group_step_description(entry: &ChatEntry) -> String {
+    if is_approval_review(&entry.text) {
+        "Approval check".into()
+    } else {
+        tool_description(&entry.text).0
+    }
+}
+
+fn ongoing_tool_description(entry: &ChatEntry) -> String {
+    let description = group_step_description(entry);
+    for (verb, ongoing) in [
+        ("Run ", "Running "),
+        ("Check ", "Checking "),
+        ("Read ", "Reading "),
+        ("Search ", "Searching "),
+        ("Edit ", "Editing "),
+        ("Review ", "Reviewing "),
+        ("List ", "Listing "),
+    ] {
+        if let Some(rest) = description.strip_prefix(verb) {
+            return format!("{ongoing}{rest}");
+        }
+    }
+    description
 }
 
 pub(super) fn approval_summary(entries: &[ChatEntry]) -> Option<String> {

@@ -90,6 +90,7 @@ impl Workspace {
             self.sidebar_order.push(new_id);
         }
         self.collapsed_tool_groups.retain(|(id, _)| *id != old_id);
+        self.expanded_tool_history.retain(|(id, _)| *id != old_id);
         self.expanded_tool_rows.retain(|(id, _)| *id != old_id);
         self.chat_list_agent = None;
         self.chat_rows.clear();

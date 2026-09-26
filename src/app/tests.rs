@@ -298,18 +298,57 @@ fn tool_activity_summarizes_search_read_and_approval() {
     );
     assert_eq!(
         tool_description("cd /project && head -80 README.md && ls && git log --oneline | wc -l"),
-        ("Read README.md · List files · 2 more".into(), true)
+        ("Inspect project (4 steps)".into(), true)
+    );
+    assert_eq!(
+        tool_description("cat src/app.rs && cat src/app/tests.rs && cat src/app/render.rs"),
+        ("Read files (3 steps)".into(), true)
+    );
+    assert_eq!(
+        tool_description("cargo fmt --all -- --check && git diff --check"),
+        ("Check formatting · Check patch whitespace".into(), true)
+    );
+    assert_eq!(
+        tool_description("cargo test --locked file_mention_completes_at_cursor"),
+        ("Run targeted test".into(), true)
     );
     let mut agent = agent(ProtocolVersion::V1);
     agent.log(Role::Tool, "rg -n guardian src");
     agent.log(Role::Tool, "Guardian Review");
     agent.log(Role::Tool, "cat README.md");
-    assert_eq!(tool_group_heading(&agent.messages), "Ran");
+    assert_eq!(tool_group_heading(&agent.messages), "Activity");
     assert_eq!(
         approval_summary(&agent.messages).as_deref(),
         Some("1 approval check")
     );
     assert_eq!(markdown_code_block("a ``` b"), "````\na ``` b\n````");
+}
+
+#[test]
+fn tool_group_heading_tracks_live_and_finished_steps() {
+    let mut agent = agent(ProtocolVersion::V2);
+    agent.log(Role::Tool, "cat src/app.rs · completed");
+    agent.log(Role::Tool, "cargo test --locked cursor_test · in_progress");
+    agent.log(Role::Tool, "Guardian Review · completed");
+    assert_eq!(
+        tool_group_heading(&agent.messages),
+        "Working · Running targeted test"
+    );
+    agent.messages[1].text = "cargo test --locked cursor_test · completed".into();
+    assert_eq!(tool_group_heading(&agent.messages), "Completed");
+    agent.log(Role::Tool, "Using tool · in_progress");
+    assert_eq!(tool_group_heading(&agent.messages), "Working · Using tool");
+    agent.messages.pop();
+    agent.messages[2].text = "Guardian Review · pending".into();
+    assert_eq!(
+        tool_group_heading(&agent.messages),
+        "Waiting · Approval check"
+    );
+    agent.messages[2].text = "Guardian Review · failed".into();
+    assert_eq!(
+        tool_group_heading(&agent.messages),
+        "Needs attention · Approval check"
+    );
 }
 
 #[test]
