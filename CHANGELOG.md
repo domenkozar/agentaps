@@ -31,6 +31,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Changed
 
+- `@` completion includes folders and shows a folder icon beside them.
 - Desktop platform downloads now appear in the opening section, with availability shown there instead of in a separate section.
 - New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.

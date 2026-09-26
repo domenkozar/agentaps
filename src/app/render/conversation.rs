@@ -455,9 +455,13 @@ impl Workspace {
                         .when(index == self.file_selection, |row| row.bg(rgb(SELECTED)))
                         .hover(|style| style.bg(rgb(SELECTED)))
                         .child(
-                            Icon::new(IconName::File)
-                                .size(px(16.))
-                                .text_color(rgb(ACCENT)),
+                            Icon::new(if file.ends_with('/') {
+                                IconName::Folder
+                            } else {
+                                IconName::File
+                            })
+                            .size(px(16.))
+                            .text_color(rgb(ACCENT)),
                         )
                         .child(div().min_w(px(0.)).truncate().text_sm().child(name))
                         .on_click(cx.listener(move |this, _, window, cx| {

@@ -87,7 +87,7 @@ impl FileSearch {
 
 pub fn scan_project(root: &Path, injector: &Injector<String>) {
     let mut pending = vec![root.to_path_buf()];
-    let mut files = Vec::new();
+    let mut paths = Vec::new();
     while let Some(directory) = pending.pop() {
         let Ok(entries) = fs::read_dir(directory) else {
             continue;
@@ -102,24 +102,27 @@ pub fn scan_project(root: &Path, injector: &Injector<String>) {
                     entry.file_name().to_str(),
                     Some(".git" | "node_modules" | "target" | ".venv" | "dist" | "build")
                 ) {
+                    if let Ok(relative) = path.strip_prefix(root) {
+                        paths.push(format!("{}/", relative.to_string_lossy()));
+                    }
                     pending.push(path);
                 }
             } else if file_type.is_file()
                 && let Ok(relative) = path.strip_prefix(root)
             {
-                files.push(relative.to_string_lossy().into_owned());
-                if files.len() >= FILE_LIMIT {
-                    break;
-                }
+                paths.push(relative.to_string_lossy().into_owned());
+            }
+            if paths.len() >= FILE_LIMIT {
+                break;
             }
         }
-        if files.len() >= FILE_LIMIT {
+        if paths.len() >= FILE_LIMIT {
             break;
         }
     }
-    files.sort();
-    for file in files {
-        injector.push(file, |path, columns| {
+    paths.sort();
+    for path in paths {
+        injector.push(path, |path, columns| {
             columns[0] = Utf32String::from(path.clone());
         });
     }
@@ -130,7 +133,7 @@ pub fn scan_remote_project(root: &Path, host: &str, injector: &Injector<String>)
         return;
     };
     let command = format!(
-        "cd {} && find . -type d \\( -name .git -o -name node_modules -o -name target -o -name .venv -o -name dist -o -name build \\) -prune -o -type f -print0",
+        "cd {} && find . -type d \\( -name .git -o -name node_modules -o -name target -o -name .venv -o -name dist -o -name build \\) -prune -o -type d -exec sh -c 'for path do [ \"$path\" = . ] || printf \"%s/\\\\0\" \"$path\"; done' sh {{}} + -o -type f -print0",
         crate::remote::quote_shell(root),
     );
     let Ok(mut child) = Command::new("ssh")
@@ -208,6 +211,14 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(search.results(), &["src/main.rs"]);
+        search.set_query("src");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while search.loading() && Instant::now() < deadline {
+            search.tick();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(search.results().contains(&"src/".to_owned()));
+        assert!(!search.results().contains(&"target/".to_owned()));
         fs::remove_dir_all(project).unwrap();
     }
 }
