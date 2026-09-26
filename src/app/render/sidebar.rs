@@ -349,6 +349,19 @@ impl Workspace {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_picker(PickerStep::Folders, window, cx)
                             })),
+                    )
+                    .child(
+                        div()
+                            .id("mobile-access")
+                            .cursor_pointer()
+                            .rounded_md()
+                            .px_2()
+                            .py_2()
+                            .text_xs()
+                            .text_color(rgb(MUTED))
+                            .hover(|style| style.bg(rgb(HOVER)).text_color(rgb(TEXT)))
+                            .child("Mobile")
+                            .on_click(cx.listener(|this, _, _, cx| this.show_mobile_link(cx))),
                     ),
             )
     }

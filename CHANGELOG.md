@@ -15,7 +15,12 @@ Notable changes to Agentaps are recorded here.
 - Agent replies offer a copy button below the fork icon that matches its size and briefly shows a checkmark after copying the reply text.
 - Starting a message with `!` asks the agent to run the exact shell command and shows `shell` inside the composer.
 - Diff buttons show live added and removed line counts without loading the full diff while closed.
-- Typing `@` in a prompt offers fuzzy file path completion from the current project.
+- The browser can start a new local or SSH agent session from its agents page.
+- The browser lists saved desktop pairings so you can choose which one to unlock or pair another desktop.
+- The browser can open its camera to scan the desktop pairing QR code directly on the site.
+- Typing `@` in a prompt offers fuzzy file path completion from the current project, including SSH projects.
+- A browser preview can view active sessions and send prompts, stop turns, and answer ACP permission requests through an encrypted Iroh connection.
+- Projects on SSH servers can run ACP agents remotely while conversations stay in Agentaps.
 - Search fields show a clear button while typing, and Escape clears the current search.
 - Session headers let you choose from models offered by the connected agent.
 - Session headers let you start a new session with another coding agent in the same project.
@@ -26,6 +31,12 @@ Notable changes to Agentaps are recorded here.
 - New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.
 - The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
+- The browser agents page uses New in place of Lock and hides the Connected label when the session is healthy.
+- The browser opens with a compact saved desktop chooser, and saved desktops can be renamed.
+- Desktop mobile pairing shows a large QR code across the main window for easier phone scanning.
+- Mobile pairing uses a one time link and saves an encrypted connection in the phone browser, protected by a passphrase or a compatible phone passkey. Unlocking opens the session without another Connect step.
+- Desktop pairing links point to `agentaps.dev` by default.
+- Mobile access stores its Iroh identity and pairing token in the user-global SecretSpec provider and gives setup guidance when none is configured.
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
 - Dragging an agent in the sidebar shows a horizontal line at its drop position.
 - Tool activity highlights the current step, groups completed steps, and describes checks and tests in plain language.
@@ -34,6 +45,10 @@ Notable changes to Agentaps are recorded here.
 
 - The visible saved session connects before other sessions on startup, and connection replies are handled sooner.
 - File path completion adds a space and closes its suggestion menu.
+- Finger swipes scroll browser conversations, and phone keyboards can type into the browser chat composer while the page adjusts to the keyboard.
+- The browser conversation is easier to read on phones, with distinct message roles, formatted replies, a visible composer, and automatic scrolling to new replies when already at the bottom.
+- Mobile pairing keeps its Iroh connection open until the browser receives the reply and reports desktop connection errors in logs.
+- The browser preview falls back to WebGL2 when WebGPU cannot initialize.
 - Diff review opens promptly and shows loading progress while checkout changes are read.
 
 ## [0.2.1] - 2026-09-25

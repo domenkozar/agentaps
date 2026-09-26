@@ -7,6 +7,8 @@ mod discovery;
 mod file_search;
 mod folder_search;
 mod git_diff;
+mod mobile;
+mod remote;
 mod theme;
 
 fn main() {

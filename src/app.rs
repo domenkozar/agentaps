@@ -38,6 +38,7 @@ use std::{
 
 mod agent;
 mod elicitation;
+mod mobile;
 mod render;
 mod sessions;
 #[cfg(test)]
@@ -258,8 +259,18 @@ fn completed_file_text(
 
 struct ProjectView {
     path: PathBuf,
+    ssh_host: Option<String>,
     branch: String,
     agents: Vec<AgentView>,
+}
+
+impl ProjectView {
+    fn display_path(&self) -> String {
+        self.ssh_host.as_ref().map_or_else(
+            || self.path.display().to_string(),
+            |host| crate::remote::project_label(host, &self.path),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -418,6 +429,11 @@ struct Workspace {
     dirty: bool,
     last_saved: Instant,
     notice: Option<String>,
+    mobile: Option<crate::mobile::Server>,
+    mobile_endpoint_id: Option<String>,
+    mobile_pairing_visible: bool,
+    mobile_qr: Option<Vec<Vec<bool>>>,
+    last_mobile_snapshot: Option<Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -591,16 +607,22 @@ impl Workspace {
             let generation = self.file_scan_generation;
             self.file_selection = 0;
             self.file_dismissed = false;
-            self.file_search = project_index.map(|index| {
+            self.file_search = project_index.and_then(|index| {
+                let project = &self.projects[index];
                 let search = FileSearch::new();
                 let injector = search.injector();
-                let root = self.projects[index].path.clone();
+                let root = project.path.clone();
+                let host = project.ssh_host.clone();
                 let sender = self.file_scan_tx.clone();
                 std::thread::spawn(move || {
-                    scan_project(&root, &injector);
+                    if let Some(host) = host {
+                        crate::file_search::scan_remote_project(&root, &host, &injector);
+                    } else {
+                        scan_project(&root, &injector);
+                    }
                     let _ = sender.send(generation);
                 });
-                search
+                Some(search)
             });
         }
         if matches!(self.view, WorkspaceView::Archive { .. })
@@ -613,6 +635,11 @@ impl Workspace {
     }
 
     fn open_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
+        if self.projects[project_index].ssh_host.is_some() {
+            self.notice = Some("Diff review for SSH projects is not available yet".into());
+            cx.notify();
+            return;
+        }
         self.diff_visible = true;
         self.diff_selected_file = None;
         self.diff_files.clear();
@@ -688,8 +715,10 @@ impl Workspace {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let picker_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search folders by name or path…"));
+        let picker_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search folders or enter ssh://host/absolute/path…")
+        });
         let sidebar_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search sessions…"));
         let composer = cx.new(|cx| {
@@ -800,8 +829,12 @@ impl Workspace {
             .projects
             .into_iter()
             .map(|project| ProjectView {
-                branch: branch(&project.path),
+                branch: project
+                    .ssh_host
+                    .clone()
+                    .unwrap_or_else(|| branch(&project.path)),
                 path: project.path,
+                ssh_host: project.ssh_host,
                 agents: project.agents.into_iter().map(AgentView::new).collect(),
             })
             .collect();
@@ -818,7 +851,7 @@ impl Workspace {
         }
         let mut recent_folders: Vec<PathBuf> = projects
             .iter()
-            .map(|project| project.path.clone())
+            .map(|project| PathBuf::from(project.display_path()))
             .collect();
         if let Ok(cwd) = std::env::current_dir().and_then(|path| path.canonicalize())
             && !recent_folders.contains(&cwd)
@@ -898,6 +931,11 @@ impl Workspace {
             dirty: migrate_config,
             last_saved: Instant::now(),
             notice,
+            mobile: None,
+            mobile_endpoint_id: None,
+            mobile_pairing_visible: false,
+            mobile_qr: None,
+            last_mobile_snapshot: None,
             _subscriptions,
         };
         let mut selected = None;
@@ -981,7 +1019,11 @@ impl Workspace {
                 let Ok(connecting_session) = this.update_in(cx, |this, window, cx| {
                     this.poll_events(window, cx);
                     if let Ok(mut folders) = this.folders_rx.try_recv() {
-                        folders.extend(this.projects.iter().map(|project| project.path.clone()));
+                        folders.extend(
+                            this.projects
+                                .iter()
+                                .map(|project| PathBuf::from(project.display_path())),
+                        );
                         folders.sort();
                         folders.dedup();
                         this.folder_search.set_paths(&folders);
@@ -1038,6 +1080,7 @@ impl Workspace {
                 .iter()
                 .map(|project| ProjectConfig {
                     path: project.path.clone(),
+                    ssh_host: project.ssh_host.clone(),
                     agents: project.agents.iter().map(AgentView::snapshot).collect(),
                 })
                 .collect(),
@@ -1067,7 +1110,7 @@ impl Workspace {
             input.set_placeholder(
                 match step {
                     PickerStep::Agents { .. } => "Search installed agents or enter an ACP command…",
-                    PickerStep::Folders => "Search folders by name or path…",
+                    PickerStep::Folders => "Search folders or enter ssh://host/absolute/path…",
                 },
                 window,
                 cx,
@@ -1217,10 +1260,18 @@ impl Workspace {
     }
 
     fn select_folder(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let path = match path.canonicalize() {
-            Ok(path) if path.is_dir() => path,
-            _ => {
-                self.notice = Some("Choose an existing folder".into());
+        let (path, ssh_host) = match crate::remote::parse_project(&path.to_string_lossy()) {
+            Ok(Some(remote)) => (remote.path, Some(remote.host)),
+            Ok(None) => match path.canonicalize() {
+                Ok(path) if path.is_dir() => (path, None),
+                _ => {
+                    self.notice = Some("Choose an existing folder".into());
+                    cx.notify();
+                    return;
+                }
+            },
+            Err(error) => {
+                self.notice = Some(error);
                 cx.notify();
                 return;
             }
@@ -1228,16 +1279,20 @@ impl Workspace {
         let project_index = if let Some(index) = self
             .projects
             .iter()
-            .position(|project| project.path == path)
+            .position(|project| project.path == path && project.ssh_host == ssh_host)
         {
             index
         } else {
             self.projects.push(ProjectView {
-                branch: branch(&path),
+                branch: ssh_host.clone().unwrap_or_else(|| branch(&path)),
                 path: path.clone(),
+                ssh_host: ssh_host.clone(),
                 agents: Vec::new(),
             });
-            self.folder_search.add_recent(path);
+            self.folder_search.add_recent(match &ssh_host {
+                Some(host) => PathBuf::from(crate::remote::project_label(host, &path)),
+                None => path,
+            });
             self.persist();
             self.projects.len() - 1
         };
@@ -1272,8 +1327,26 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let (_, agent_index) = self.create_agent_for_project(project_index, command, name, cx);
+        self.set_view(WorkspaceView::Conversation(SessionLocation {
+            project_index,
+            agent_index,
+        }));
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn create_agent_for_project(
+        &mut self,
+        project_index: usize,
+        command: Vec<String>,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> (u64, usize) {
+        let id = self.next_agent_id;
         let config = AgentConfig {
-            id: self.next_agent_id,
+            id,
             command,
             archived: false,
             display_name: name,
@@ -1298,15 +1371,10 @@ impl Workspace {
         if !self.deferred_connections.is_empty() {
             self.deferred_connections_deadline = Some(Instant::now() + Duration::from_secs(2));
         }
-        self.set_view(WorkspaceView::Conversation(SessionLocation {
-            project_index,
-            agent_index,
-        }));
         self.notice = None;
         self.persist();
-        self.composer
-            .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
+        (id, agent_index)
     }
 
     fn move_agent(&mut self, dragged: u64, target: u64, cx: &mut Context<Self>) {
@@ -1382,7 +1450,7 @@ impl Workspace {
                     self.select_folder(path, window, cx);
                 } else {
                     self.notice =
-                        Some("No matching folder. Type an existing absolute path.".into());
+                        Some("Enter a local absolute path or ssh://host/absolute/path.".into());
                     cx.notify();
                 }
             }
@@ -1639,6 +1707,12 @@ impl Workspace {
     }
 
     fn handle_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mobile_pairing_visible {
+            self.mobile_pairing_visible = false;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if self.file_mention_active(cx) {
             self.handle_slash_action(SlashAction::Dismiss, window, cx);
             return;

@@ -2,7 +2,13 @@ use nucleo::{
     Config, Injector, Nucleo, Utf32String,
     pattern::{CaseMatching, Normalization},
 };
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    fs,
+    io::BufRead,
+    path::Path,
+    process::{Command, Stdio},
+    sync::Arc,
+};
 
 const RESULT_LIMIT: usize = 12;
 const FILE_LIMIT: usize = 50_000;
@@ -117,6 +123,60 @@ pub fn scan_project(root: &Path, injector: &Injector<String>) {
             columns[0] = Utf32String::from(path.clone());
         });
     }
+}
+
+pub fn scan_remote_project(root: &Path, host: &str, injector: &Injector<String>) {
+    let Some(root) = root.to_str() else {
+        return;
+    };
+    let command = format!(
+        "cd {} && find . -type d \\( -name .git -o -name node_modules -o -name target -o -name .venv -o -name dist -o -name build \\) -prune -o -type f -print0",
+        crate::remote::quote_shell(root),
+    );
+    let Ok(mut child) = Command::new("ssh")
+        .args([
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "ConnectTimeout=10",
+            host,
+        ])
+        .arg(command)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    if let Some(stdout) = child.stdout.take() {
+        let mut output = std::io::BufReader::new(stdout);
+        let mut path = Vec::new();
+        for _ in 0..FILE_LIMIT {
+            path.clear();
+            if output
+                .read_until(0, &mut path)
+                .ok()
+                .filter(|read| *read > 0)
+                .is_none()
+            {
+                break;
+            }
+            if path.last() == Some(&0) {
+                path.pop();
+            }
+            let path = String::from_utf8_lossy(&path);
+            if let Some(path) = path.strip_prefix("./") {
+                injector.push(path.to_owned(), |path, columns| {
+                    columns[0] = Utf32String::from(path.clone());
+                });
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

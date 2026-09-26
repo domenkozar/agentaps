@@ -39,8 +39,103 @@ fn status_badge(agent: &AgentView) -> impl IntoElement {
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
 }
 
+impl Workspace {
+    fn render_mobile_pairing(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        let viewport = window.viewport_size();
+        let available = (f32::from(viewport.width) - 64.)
+            .min(f32::from(viewport.height) - 210.)
+            .min(720.)
+            .max(80.);
+        let mut qr = div().flex().flex_col().flex_shrink_0().bg(rgb(0xffffff));
+        if let Some(rows) = &self.mobile_qr {
+            let module_size = (available / (rows.len() as f32 + 8.)).floor().max(1.);
+            qr = qr.p(px(module_size * 4.));
+            for row in rows {
+                let mut line = div().flex().flex_shrink_0();
+                for dark in row {
+                    line = line.child(
+                        div()
+                            .size(px(module_size))
+                            .flex_shrink_0()
+                            .bg(rgb(if *dark { 0x000000 } else { 0xffffff })),
+                    );
+                }
+                qr = qr.child(line);
+            }
+        }
+        let site = self
+            .mobile_link()
+            .and_then(|link| link.split_once('#').map(|(site, _)| site.to_owned()))
+            .unwrap_or_default();
+        div()
+            .id("mobile-pairing-overlay")
+            .absolute()
+            .top(px(0.))
+            .left(px(0.))
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_4()
+            .p_4()
+            .overflow_y_scroll()
+            .bg(rgb(BG))
+            .text_color(rgb(TEXT))
+            .child(div().text_2xl().child("Connect your phone"))
+            .child(
+                div()
+                    .text_color(rgb(MUTED))
+                    .text_center()
+                    .child(format!("Open {site} on your phone and scan this code.")),
+            )
+            .child(qr)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .id("copy-mobile-link")
+                            .cursor_pointer()
+                            .rounded_md()
+                            .px_4()
+                            .py_2()
+                            .bg(rgb(ACCENT_SURFACE))
+                            .child("Copy link")
+                            .on_click(cx.listener(|this, _, _, cx| this.copy_mobile_link(cx))),
+                    )
+                    .child(
+                        div()
+                            .id("close-mobile-pairing")
+                            .cursor_pointer()
+                            .rounded_md()
+                            .px_4()
+                            .py_2()
+                            .bg(rgb(SURFACE))
+                            .child("Close")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.mobile_pairing_visible = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .when_some(self.notice.as_ref(), |overlay, notice| {
+                overlay.child(div().text_color(rgb(MUTED)).child(notice.clone()))
+            })
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mobile_pairing = self
+            .mobile_pairing_visible
+            .then(|| self.render_mobile_pairing(window, cx));
         let sidebar = self.render_sidebar(window, cx);
         let divider = div()
             .id("sidebar-divider")
@@ -110,6 +205,7 @@ impl Render for Workspace {
         }
         div()
             .size_full()
+            .relative()
             .flex()
             .bg(rgb(BG))
             .on_action(cx.listener(Self::quick_open))
@@ -144,5 +240,6 @@ impl Render for Workspace {
             .child(sidebar)
             .child(divider)
             .child(chat)
+            .when_some(mobile_pairing, |root, pairing| root.child(pairing))
     }
 }

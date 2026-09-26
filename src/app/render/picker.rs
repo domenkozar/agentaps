@@ -15,7 +15,7 @@ impl Workspace {
                     if !self.folder_scan_complete || self.folder_search.searching() {
                         "Looking for folders…"
                     } else {
-                        "No matching folders. Enter an existing absolute path."
+                        "No matching folders. Enter a local path or ssh://host/absolute/path."
                     },
                 ));
             }
@@ -241,7 +241,7 @@ impl Workspace {
                                 }),
                         )
                         .child(div().text_sm().text_color(rgb(MUTED)).child(if is_folders {
-                            "Search your folders or enter an absolute path."
+                            "Search local folders or enter ssh://host/absolute/path."
                         } else {
                             "Select an installed agent or enter an ACP command."
                         }))

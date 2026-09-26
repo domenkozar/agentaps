@@ -24,26 +24,48 @@ impl Connection {
         agent_id: u64,
         command: &[String],
         cwd: &Path,
+        ssh_host: Option<&str>,
         events: Sender<Event>,
     ) -> Result<Self, String> {
         let (program, args) = command.split_first().ok_or("Agent command is empty")?;
-        let mut process = Command::new(program);
+        let mut process = if let Some(host) = ssh_host {
+            let remote_command = crate::remote::agent_command(command, cwd)?;
+            let mut ssh = Command::new("ssh");
+            ssh.args([
+                "-T",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "ConnectTimeout=10",
+                host,
+            ])
+            .arg(remote_command);
+            ssh
+        } else {
+            let mut local = Command::new(program);
+            local.args(args).current_dir(cwd);
+            local
+        };
         process
-            .args(args)
-            .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        if Path::new("/etc/NIXOS").exists()
+        if ssh_host.is_none()
+            && Path::new("/etc/NIXOS").exists()
             && command.iter().any(|part| part.contains("claude-agent-acp"))
             && std::env::var_os("CLAUDE_CODE_EXECUTABLE").is_none()
             && let Some(claude) = find_executable("claude")
         {
             process.env("CLAUDE_CODE_EXECUTABLE", claude);
         }
-        let mut child = process
-            .spawn()
-            .map_err(|error| format!("Could not start {program}: {error}"))?;
+        let mut child = process.spawn().map_err(|error| {
+            format!(
+                "Could not start {}: {error}",
+                if ssh_host.is_some() { "ssh" } else { program }
+            )
+        })?;
         let mut stdin = child.stdin.take().ok_or("Agent stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("Agent stdout unavailable")?;
         let (outgoing, incoming): (Sender<Value>, Receiver<Value>) = mpsc::channel();
@@ -122,7 +144,7 @@ mod tests {
         let script = "IFS= read -r request; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}'";
         let command = vec!["/bin/sh".into(), "-c".into(), script.into()];
         let (tx, rx) = mpsc::channel();
-        let connection = Connection::spawn(7, &command, Path::new("/"), tx).unwrap();
+        let connection = Connection::spawn(7, &command, Path::new("/"), None, tx).unwrap();
         connection
             .send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
             .unwrap();
