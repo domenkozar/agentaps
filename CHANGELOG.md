@@ -23,6 +23,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Changed
 
+- Running tool activity uses the same status dot as a working agent.
 - The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
 - Dragging an agent in the sidebar shows a horizontal line at its drop position.

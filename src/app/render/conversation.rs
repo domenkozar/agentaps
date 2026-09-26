@@ -388,12 +388,7 @@ impl Workspace {
                     .gap_2()
                     .text_xs()
                     .text_color(rgb(MUTED))
-                    .child(
-                        div()
-                            .size(px(6.))
-                            .rounded_full()
-                            .bg(rgb(Status::Working.color())),
-                    )
+                    .child(status_dot(Status::Working.color()))
                     .child(if agent.cancel_requested {
                         "Stopping agent"
                     } else if agent.awaiting_response {

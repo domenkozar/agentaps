@@ -1,5 +1,21 @@
 use super::*;
 
+fn tool_status_marker(marker: &'static str, color: u32) -> Div {
+    let indicator = div()
+        .w(px(14.))
+        .h(px(18.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(color));
+    if marker == "◌" {
+        indicator.child(status_dot(color))
+    } else {
+        indicator.child(marker)
+    }
+}
+
 impl Workspace {
     pub(super) fn render_tool_group(
         &self,
@@ -58,7 +74,7 @@ impl Workspace {
                 .items_center()
                 .gap_2()
                 .text_sm()
-                .child(div().text_color(rgb(marker_color)).child(marker))
+                .child(tool_status_marker(marker, marker_color))
                 .child(
                     div()
                         .min_w(px(0.))
@@ -151,13 +167,7 @@ impl Workspace {
                         .items_start()
                         .gap_2()
                         .text_sm()
-                        .child(
-                            div()
-                                .w(px(14.))
-                                .flex_shrink_0()
-                                .text_color(rgb(status_color))
-                                .child(status_marker),
-                        )
+                        .child(tool_status_marker(status_marker, status_color))
                         .child(
                             div()
                                 .min_w(px(0.))
@@ -216,12 +226,7 @@ impl Workspace {
                         .gap_2()
                         .text_xs()
                         .text_color(rgb(MUTED))
-                        .child(
-                            div()
-                                .w(px(14.))
-                                .text_color(rgb(status_color))
-                                .child(status_marker),
-                        )
+                        .child(tool_status_marker(status_marker, status_color).h(px(16.)))
                         .child(summary),
                 );
             }

@@ -8,6 +8,10 @@ mod picker;
 mod sidebar;
 mod tool_group;
 
+fn status_dot(color: u32) -> Div {
+    div().size(px(7.)).rounded_full().bg(rgb(color))
+}
+
 fn status_badge(agent: &AgentView) -> impl IntoElement {
     let pending = agent.elicitations.len();
     let color = if pending > 0 {
@@ -31,7 +35,7 @@ fn status_badge(agent: &AgentView) -> impl IntoElement {
         .size(px(12.))
         .items_center()
         .justify_center()
-        .child(div().size(px(7.)).rounded_full().bg(rgb(color)))
+        .child(status_dot(color))
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
 }
 
