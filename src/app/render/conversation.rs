@@ -294,12 +294,12 @@ impl Workspace {
                             .path
                             .file_name()
                             .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| project.path.display().to_string())
+                            .unwrap_or_else(|| project.display_path())
                     } else {
-                        project.path.display().to_string()
+                        project.display_path()
                     })
                     .tooltip({
-                        let path = project.path.display().to_string();
+                        let path = project.display_path();
                         move |window, cx| Tooltip::new(path.clone()).build(window, cx)
                     }),
             )

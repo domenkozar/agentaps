@@ -72,6 +72,8 @@ pub struct AgentConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectConfig {
     pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_host: Option<String>,
     #[serde(default)]
     pub agents: Vec<AgentConfig>,
 }

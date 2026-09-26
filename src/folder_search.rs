@@ -77,10 +77,14 @@ impl FolderSearch {
         self.direct_path = if query.is_empty() {
             None
         } else {
-            PathBuf::from(query)
-                .canonicalize()
-                .ok()
-                .filter(|path| path.is_dir())
+            if crate::remote::parse_project(query).ok().flatten().is_some() {
+                Some(PathBuf::from(query))
+            } else {
+                PathBuf::from(query)
+                    .canonicalize()
+                    .ok()
+                    .filter(|path| path.is_dir())
+            }
         };
         self.results.clear();
         if query.is_empty() {

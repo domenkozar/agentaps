@@ -82,14 +82,19 @@ fn workspace_view_keeps_sidebar_selection_exclusive() {
 }
 
 #[test]
-fn archive_icons_are_bundled() {
+fn sidebar_icons_are_bundled() {
     assert!(
-        gpui::AssetSource::load(&Assets, "icons/inbox.svg")
+        gpui::AssetSource::load(&AppAssets, "icons/inbox.svg")
             .unwrap()
             .is_some()
     );
     assert!(
-        gpui::AssetSource::load(&Assets, "icons/undo-2.svg")
+        gpui::AssetSource::load(&AppAssets, "icons/undo-2.svg")
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        gpui::AssetSource::load(&AppAssets, "icons/mobile.svg")
             .unwrap()
             .is_some()
     );
@@ -313,7 +318,8 @@ fn fork_supplies_only_active_conversation_to_first_prompt() {
         "while IFS= read -r line; do printf '%s\\n' \"$line\"; done".into(),
     ];
     let (events_tx, events_rx) = mpsc::channel();
-    fork.connection = Some(Connection::spawn(2, &command, Path::new("/"), events_tx).unwrap());
+    fork.connection =
+        Some(Connection::spawn(2, &command, Path::new("/"), None, events_tx).unwrap());
 
     fork.start_prompt("New direction".into()).unwrap();
     let Event::Message { value, .. } = events_rx.recv_timeout(Duration::from_secs(2)).unwrap()
@@ -656,7 +662,8 @@ fn queued_prompts_reach_the_agent_in_order_after_each_turn() {
         "while IFS= read -r line; do printf '%s\\n' \"$line\"; done".into(),
     ];
     let (events_tx, events_rx) = mpsc::channel();
-    agent.connection = Some(Connection::spawn(1, &command, Path::new("/"), events_tx).unwrap());
+    agent.connection =
+        Some(Connection::spawn(1, &command, Path::new("/"), None, events_tx).unwrap());
     agent.config.pending_prompts = vec!["First".into(), "!printf '%s' hi".into()];
 
     assert!(!agent.start_next_queued_prompt());

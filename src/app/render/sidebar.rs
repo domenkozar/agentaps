@@ -286,8 +286,6 @@ impl Workspace {
                         div()
                             .id("archived-toggle")
                             .cursor_pointer()
-                            .flex_1()
-                            .min_w(px(0.))
                             .rounded_md()
                             .border_1()
                             .border_color(rgb(if archive_view { ACCENT } else { SIDEBAR }))
@@ -296,17 +294,9 @@ impl Workspace {
                             .py_2()
                             .flex()
                             .items_center()
-                            .gap_1()
-                            .text_xs()
                             .text_color(rgb(if archive_view { TEXT } else { MUTED }))
                             .hover(|style| style.bg(rgb(DROP_TARGET)).text_color(rgb(TEXT)))
-                            .child(
-                                Icon::new(IconName::Inbox)
-                                    .size(px(14.))
-                                    .text_color(rgb(if archive_view { TEXT } else { MUTED })),
-                            )
-                            .child("Archive")
-                            .child(format!("{archived_count}"))
+                            .child(Icon::new(IconName::Inbox).size(px(14.)))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(archive_tooltip).build(window, cx)
                             })
@@ -322,6 +312,28 @@ impl Workspace {
                                 cx.notify();
                             })),
                     )
+                    .child(
+                        div()
+                            .id("mobile-access")
+                            .cursor_pointer()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(SIDEBAR))
+                            .px_2()
+                            .py_2()
+                            .flex()
+                            .items_center()
+                            .text_color(rgb(MUTED))
+                            .hover(|style| style.bg(rgb(HOVER)).text_color(rgb(TEXT)))
+                            .child(Icon::empty().path("icons/mobile.svg").size(px(14.)))
+                            .tooltip(|window, cx| Tooltip::new("Mobile access").build(window, cx))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.show_mobile_link(window, cx)
+                                }),
+                            ),
+                    )
+                    .child(div().flex_1())
                     .child(
                         div()
                             .id("quick-open")

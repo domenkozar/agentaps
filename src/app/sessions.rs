@@ -153,6 +153,7 @@ impl Workspace {
             agent.config.id,
             &agent.config.command,
             &project.path,
+            project.ssh_host.as_deref(),
             self.events_tx.clone(),
         ) {
             Ok(connection) => {
@@ -516,6 +517,7 @@ impl Workspace {
             self.dirty = true;
             cx.notify();
         }
+        self.poll_mobile(cx);
         if self.dirty && self.last_saved.elapsed() >= Duration::from_secs(1) {
             self.persist();
         }
@@ -942,7 +944,10 @@ impl Workspace {
     pub(super) fn refresh_branches(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         for project in &mut self.projects {
-            let fresh = branch(&project.path);
+            let fresh = project
+                .ssh_host
+                .clone()
+                .unwrap_or_else(|| branch(&project.path));
             if fresh != project.branch {
                 project.branch = fresh;
                 changed = true;
