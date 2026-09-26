@@ -40,6 +40,112 @@ fn status_badge(agent: &AgentView) -> impl IntoElement {
 }
 
 impl Workspace {
+    fn render_mobile_provider(&self, error: &str, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        div()
+            .id("mobile-provider-overlay")
+            .absolute()
+            .top(px(0.))
+            .left(px(0.))
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_4()
+            .bg(rgb(BG))
+            .text_color(rgb(TEXT))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(560.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(BORDER))
+                    .bg(rgb(SURFACE))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(div().text_2xl().child("Choose a SecretSpec provider"))
+                    .child(div().text_sm().text_color(rgb(ERROR_TEXT)).child(error.to_owned()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(MUTED))
+                            .child("Use a provider for this run:"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("mobile-provider-keyring")
+                                    .cursor_pointer()
+                                    .rounded_md()
+                                    .px_4()
+                                    .py_2()
+                                    .bg(rgb(ACCENT_SURFACE))
+                                    .child("System keyring")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.use_mobile_provider_named("keyring", cx)
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .id("mobile-provider-onepassword")
+                                    .cursor_pointer()
+                                    .rounded_md()
+                                    .px_4()
+                                    .py_2()
+                                    .bg(rgb(ACCENT_SURFACE))
+                                    .child("1Password")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.use_mobile_provider_named("onepassword", cx)
+                                    })),
+                            ),
+                    )
+                    .child(Input::new(&self.mobile_provider_input))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("mobile-provider-custom")
+                                    .cursor_pointer()
+                                    .rounded_md()
+                                    .px_4()
+                                    .py_2()
+                                    .bg(rgb(ACCENT_SURFACE))
+                                    .child("Use provider")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.use_mobile_provider(cx)
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .id("close-mobile-provider")
+                                    .cursor_pointer()
+                                    .rounded_md()
+                                    .px_4()
+                                    .py_2()
+                                    .bg(rgb(BG))
+                                    .child("Close")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.mobile_provider_prompt = None;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(MUTED))
+                            .child("To keep a default provider for future launches, run `secretspec config global init`."),
+                    ),
+            )
+    }
+
     fn render_mobile_pairing(
         &self,
         window: &Window,
@@ -136,6 +242,10 @@ impl Render for Workspace {
         let mobile_pairing = self
             .mobile_pairing_visible
             .then(|| self.render_mobile_pairing(window, cx));
+        let mobile_provider = self
+            .mobile_provider_prompt
+            .as_ref()
+            .map(|error| self.render_mobile_provider(error, cx));
         let sidebar = self.render_sidebar(window, cx);
         let divider = div()
             .id("sidebar-divider")
@@ -241,5 +351,6 @@ impl Render for Workspace {
             .child(divider)
             .child(chat)
             .when_some(mobile_pairing, |root, pairing| root.child(pairing))
+            .when_some(mobile_provider, |root, provider| root.child(provider))
     }
 }

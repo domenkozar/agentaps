@@ -26,7 +26,7 @@ impl Workspace {
         ))
     }
 
-    pub(super) fn show_mobile_link(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn show_mobile_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.mobile.is_none() {
             match crate::mobile::start() {
                 Ok(server) => {
@@ -36,7 +36,12 @@ impl Workspace {
                             .into(),
                     );
                 }
-                Err(error) => self.notice = Some(format!("Could not start mobile access: {error}")),
+                Err(error) => {
+                    self.mobile_provider_prompt = Some(error);
+                    self.notice = None;
+                    self.mobile_provider_input
+                        .update(cx, |input, cx| input.focus(window, cx));
+                }
             }
         } else if let Some(link) = self.mobile_link() {
             cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
@@ -57,6 +62,36 @@ impl Workspace {
             );
         } else {
             self.notice = Some("Mobile access is starting".into());
+        }
+        cx.notify();
+    }
+
+    pub(super) fn use_mobile_provider(&mut self, cx: &mut Context<Self>) {
+        let provider = self
+            .mobile_provider_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_owned();
+        self.use_mobile_provider_named(&provider, cx);
+    }
+
+    pub(super) fn use_mobile_provider_named(&mut self, provider: &str, cx: &mut Context<Self>) {
+        if provider.is_empty() {
+            self.mobile_provider_prompt = Some("Enter a SecretSpec provider name or URI.".into());
+            cx.notify();
+            return;
+        }
+        match crate::mobile::start_with_provider(Some(provider)) {
+            Ok(server) => {
+                self.mobile = Some(server);
+                self.mobile_provider_prompt = None;
+                self.notice = Some("Starting mobile access with the selected provider.".into());
+            }
+            Err(error) => {
+                self.mobile_provider_prompt =
+                    Some(format!("Could not use the selected provider: {error}"));
+            }
         }
         cx.notify();
     }

@@ -400,6 +400,7 @@ struct Workspace {
     prompt_recall: Option<PromptRecall>,
     picker_input: Entity<InputState>,
     sidebar_search: Entity<InputState>,
+    mobile_provider_input: Entity<InputState>,
     composer: Entity<TextareaState>,
     chat_list: ListState,
     chat_list_agent: Option<u64>,
@@ -433,6 +434,7 @@ struct Workspace {
     mobile: Option<crate::mobile::Server>,
     mobile_endpoint_id: Option<String>,
     mobile_pairing_visible: bool,
+    mobile_provider_prompt: Option<String>,
     mobile_qr: Option<Vec<Vec<bool>>>,
     last_mobile_snapshot: Option<Instant>,
     _subscriptions: Vec<Subscription>,
@@ -722,6 +724,9 @@ impl Workspace {
         });
         let sidebar_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search sessions…"));
+        let mobile_provider_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("keyring, onepassword, or provider URI")
+        });
         let composer = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, 6)
@@ -729,6 +734,21 @@ impl Workspace {
                 .placeholder("Ask your agent…")
         });
         let _subscriptions = vec![
+            cx.subscribe_in(
+                &mobile_provider_input,
+                window,
+                |this, _, event: &InputEvent, _, cx| {
+                    if matches!(
+                        event,
+                        InputEvent::PressEnter {
+                            secondary: false,
+                            shift: false
+                        }
+                    ) {
+                        this.use_mobile_provider(cx);
+                    }
+                },
+            ),
             cx.subscribe_in(
                 &sidebar_search,
                 window,
@@ -902,6 +922,7 @@ impl Workspace {
             prompt_recall: None,
             picker_input,
             sidebar_search,
+            mobile_provider_input,
             composer,
             chat_list: ListState::new(0, ListAlignment::Bottom, px(300.)),
             chat_list_agent: None,
@@ -935,6 +956,7 @@ impl Workspace {
             mobile: None,
             mobile_endpoint_id: None,
             mobile_pairing_visible: false,
+            mobile_provider_prompt: None,
             mobile_qr: None,
             last_mobile_snapshot: None,
             _subscriptions,
@@ -1708,6 +1730,11 @@ impl Workspace {
     }
 
     fn handle_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mobile_provider_prompt.take().is_some() {
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         if self.mobile_pairing_visible {
             self.mobile_pairing_visible = false;
             cx.stop_propagation();

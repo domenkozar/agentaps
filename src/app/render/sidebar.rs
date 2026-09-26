@@ -327,7 +327,11 @@ impl Workspace {
                             .hover(|style| style.bg(rgb(HOVER)).text_color(rgb(TEXT)))
                             .child(Icon::empty().path("icons/mobile.svg").size(px(14.)))
                             .tooltip(|window, cx| Tooltip::new("Mobile access").build(window, cx))
-                            .on_click(cx.listener(|this, _, _, cx| this.show_mobile_link(cx))),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.show_mobile_link(window, cx)
+                                }),
+                            ),
                     )
                     .child(div().flex_1())
                     .child(

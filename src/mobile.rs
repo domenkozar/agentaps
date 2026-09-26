@@ -30,7 +30,15 @@ pub struct PendingCommand {
 }
 
 const CREDENTIAL_NAME: &str = "MOBILE_CREDENTIALS";
-const CONFIGURE_PROVIDER: &str = "Configure a user-global SecretSpec provider with `secretspec config global init`, then select the phone icon again";
+const CONFIGURE_PROVIDER: &str =
+    "Run `secretspec config global init` to save a default provider, or choose one for this run";
+
+fn missing_provider(path: &Path) -> String {
+    format!(
+        "No default SecretSpec provider found in {}. {CONFIGURE_PROVIDER}",
+        path.display()
+    )
+}
 
 fn random_token() -> String {
     hex::encode(SecretKey::generate().to_bytes())
@@ -59,7 +67,7 @@ fn configured_provider_at(path: &Path) -> Result<String, String> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(CONFIGURE_PROVIDER.into());
+            return Err(missing_provider(path));
         }
         Err(error) => return Err(format!("Could not read SecretSpec configuration: {error}")),
     };
@@ -72,7 +80,7 @@ fn configured_provider_at(path: &Path) -> Result<String, String> {
         .map(str::trim)
         .filter(|provider| !provider.is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| CONFIGURE_PROVIDER.into())
+        .ok_or_else(|| missing_provider(path))
 }
 
 fn base_credential_store() -> Result<Secrets, String> {
@@ -91,7 +99,6 @@ fn base_credential_store() -> Result<Secrets, String> {
     Ok(store)
 }
 
-#[cfg(test)]
 fn credential_store_with_provider(provider: &str) -> Result<Secrets, String> {
     let mut store = base_credential_store()?;
     store.set_provider(provider);
@@ -166,8 +173,11 @@ fn credentials_with_store(store: &Secrets) -> Result<(SecretKey, String), String
     Ok((secret, token))
 }
 
-fn credentials() -> Result<(SecretKey, String), String> {
-    let store = credential_store()?;
+fn credentials(provider: Option<&str>) -> Result<(SecretKey, String), String> {
+    let store = match provider {
+        Some(provider) => credential_store_with_provider(provider)?,
+        None => credential_store()?,
+    };
     credentials_with_store(&store)
 }
 
@@ -189,7 +199,11 @@ async fn send_response(connection: Connection, mut send: SendStream, response: R
 }
 
 pub fn start() -> Result<Server, String> {
-    let (secret, token) = credentials()?;
+    start_with_provider(None)
+}
+
+pub fn start_with_provider(provider: Option<&str>) -> Result<Server, String> {
+    let (secret, token) = credentials(provider)?;
     let (commands_tx, commands) = mpsc::channel();
     let (status_tx, status) = mpsc::channel();
     let snapshot = Arc::new(Mutex::new(Response::Snapshot {
@@ -317,6 +331,11 @@ mod tests {
                 .unwrap_err()
                 .contains("secretspec config global init")
         );
+        assert!(
+            configured_provider_at(&config)
+                .unwrap_err()
+                .contains(&config.display().to_string())
+        );
         fs::write(&config, "[defaults]\nprofile = 'default'\n").unwrap();
         assert!(
             configured_provider_at(&config)
@@ -349,6 +368,16 @@ mod tests {
         let stored = read_credentials(&store).unwrap().unwrap();
         assert_eq!(stored.expose_secret().len(), 128);
         assert!(stored.expose_secret().iter().all(u8::is_ascii_hexdigit));
+    }
+
+    #[test]
+    fn ad_hoc_provider_creates_and_reuses_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = format!("file:{}", temp.path().display());
+        let (key, token) = credentials(Some(&provider)).unwrap();
+        let (saved_key, saved_token) = credentials(Some(&provider)).unwrap();
+        assert_eq!(saved_key.to_bytes(), key.to_bytes());
+        assert_eq!(saved_token, token);
     }
 
     #[test]

@@ -30,6 +30,7 @@ Notable changes to Agentaps are recorded here.
 
 - New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.
+- Desktop mobile access offers a provider choice when the SecretSpec default is unavailable and shows how to configure one permanently.
 - Archive and Mobile controls sit together as icon buttons in the desktop sidebar.
 - The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
 - The browser agents page uses New in place of Lock and hides the Connected label when the session is healthy.
