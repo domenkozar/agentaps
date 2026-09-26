@@ -213,7 +213,38 @@ impl AgentView {
             prompt_history: self.config.prompt_history.clone(),
             was_working: false,
             session_has_activity: false,
+            fork_pending: false,
         }
+    }
+
+    pub(super) fn fork_config(&self, id: u64, response_index: usize) -> Option<AgentConfig> {
+        if self.messages.get(response_index)?.role != Role::Agent {
+            return None;
+        }
+        let mut messages = self.messages[..=response_index].to_vec();
+        for entry in &mut messages {
+            entry.key = None;
+        }
+        Some(AgentConfig {
+            id,
+            command: self.config.command.clone(),
+            archived: false,
+            display_name: self.config.display_name.clone(),
+            session_id: None,
+            model: None,
+            context: None,
+            prompt_history: messages
+                .iter()
+                .filter(|entry| entry.role == Role::User)
+                .map(|entry| entry.text.clone())
+                .collect(),
+            messages,
+            available_commands: Vec::new(),
+            pending_prompts: Vec::new(),
+            was_working: false,
+            session_has_activity: false,
+            fork_pending: true,
+        })
     }
 
     pub(super) fn mark_viewed(&mut self) {
@@ -302,6 +333,7 @@ impl AgentView {
             prompt_history: self.config.prompt_history.clone(),
             was_working: self.active_work,
             session_has_activity: self.config.session_has_activity || self.active_work,
+            fork_pending: self.config.fork_pending,
         }
     }
 
@@ -320,12 +352,18 @@ impl AgentView {
         let session_id = self.session_id.clone().ok_or("Agent is still connecting")?;
         let id = self.next_request_id;
         let agent_prompt = prompt_for_agent(&prompt);
+        let agent_prompt = if self.config.fork_pending {
+            fork_prompt(&self.messages, &agent_prompt)
+        } else {
+            agent_prompt
+        };
         self.send(
             json!({"jsonrpc":"2.0","id":id,"method":"session/prompt","params":{
                 "sessionId":session_id,"prompt":[{"type":"text","text":agent_prompt}]
             }}),
         )?;
         self.next_request_id += 1;
+        self.config.fork_pending = false;
         if self.protocol == Some(ProtocolVersion::V1) {
             self.log(Role::User, prompt);
         }

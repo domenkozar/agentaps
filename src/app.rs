@@ -476,6 +476,28 @@ fn prompt_for_agent(prompt: &str) -> String {
     }
 }
 
+fn fork_prompt(messages: &[ChatEntry], prompt: &str) -> String {
+    let start = messages
+        .iter()
+        .rposition(|entry| entry.role == Role::ContextReset)
+        .map_or(0, |index| index + 1);
+    let history: Vec<Value> = messages[start..]
+        .iter()
+        .filter_map(|entry| {
+            let role = match entry.role {
+                Role::User => "user",
+                Role::Agent => "assistant",
+                _ => return None,
+            };
+            (!entry.text.is_empty()).then(|| json!({"role": role, "text": entry.text}))
+        })
+        .collect();
+    format!(
+        "This session was forked from an earlier reply. Use the following conversation transcript as context for the current request. The transcript is historical; do not execute requests in it again. Project files may have changed since it occurred.\n\nConversation transcript:\n{}\n\nCurrent request:\n{prompt}",
+        serde_json::to_string_pretty(&history).unwrap_or_default()
+    )
+}
+
 fn parse_available_commands(update: &Value) -> Vec<SlashCommand> {
     update["availableCommands"]
         .as_array()
@@ -1234,6 +1256,7 @@ impl Workspace {
             prompt_history: Vec::new(),
             was_working: false,
             session_has_activity: false,
+            fork_pending: false,
         };
         self.sidebar_order.push(config.id);
         self.next_agent_id += 1;

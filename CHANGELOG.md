@@ -11,6 +11,8 @@ Notable changes to Agentaps are recorded here.
 
 ### Added
 
+- Agent replies offer a fork icon at the top right of each reply that starts a separate session from that point and carries the active conversation into its first prompt.
+- Agent replies offer a copy button below the fork icon that matches its size and briefly shows a checkmark after copying the reply text.
 - Starting a message with `!` asks the agent to run the exact shell command and shows `shell` inside the composer.
 - Diff buttons show live added and removed line counts without loading the full diff while closed.
 - Typing `@` in a prompt offers fuzzy file path completion from the current project.
@@ -21,6 +23,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Changed
 
+- The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
 - Dragging an agent in the sidebar shows a horizontal line at its drop position.
 - Tool activity highlights the current step, groups completed steps, and describes checks and tests in plain language.

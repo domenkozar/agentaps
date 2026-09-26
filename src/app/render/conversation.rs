@@ -355,8 +355,15 @@ impl Workspace {
         let history = gpui::list(self.chat_list.clone(), move |index, window, cx| {
             view.update(cx, |this, cx| {
                 let agent = &this.projects[project_index].agents[agent_index];
-                this.render_chat_row(agent, rows[index].kind, window, cx)
-                    .into_any_element()
+                this.render_chat_row(
+                    agent,
+                    project_index,
+                    agent_index,
+                    rows[index].kind,
+                    window,
+                    cx,
+                )
+                .into_any_element()
             })
         })
         .w_full()
@@ -396,19 +403,22 @@ impl Workspace {
                     })
                     .when(!agent.cancel_requested, |row| {
                         row.child(
-                            div()
-                                .id("stop-agent")
-                                .cursor_pointer()
-                                .ml_1()
-                                .size(px(22.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_sm()
-                                .bg(rgb(SURFACE))
-                                .hover(|style| style.bg(rgb(HOVER)))
-                                .child(div().size(px(9.)).rounded_sm().bg(rgb(TEXT)))
-                                .tooltip(|window, cx| Tooltip::new("Stop agent").build(window, cx))
+                            Button::new("stop-agent")
+                                .ghost()
+                                .compact()
+                                .accessibility_label("Stop agent")
+                                .tooltip("Stop agent")
+                                .child(
+                                    div()
+                                        .size(px(16.))
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(rgb(TEXT))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(div().size(px(7.)).rounded_sm().bg(rgb(TEXT))),
+                                )
                                 .on_click(cx.listener(|this, _, _, cx| this.cancel_prompt(cx))),
                         )
                     }),

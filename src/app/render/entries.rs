@@ -2,6 +2,11 @@ use super::*;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
+#[derive(Default)]
+struct CopyFeedback {
+    copied: bool,
+}
+
 // Message text is either replaced with a new String or changed in length when updated.
 // These signatures let scroll renders check for changed rows without hashing whole transcripts.
 fn text_signature(text: &str, hasher: &mut impl Hasher) {
@@ -150,6 +155,8 @@ impl Workspace {
     pub(super) fn render_chat_row(
         &self,
         agent: &AgentView,
+        project_index: usize,
+        agent_index: usize,
         row: ChatRowKind,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -165,7 +172,9 @@ impl Workspace {
             ChatRowKind::Tools(start, end) => {
                 self.render_tool_group(agent, start, end, self.chat_text_style(cx), window, cx)
             }
-            ChatRowKind::Message(index) => self.render_message(agent, index, window, cx),
+            ChatRowKind::Message(index) => {
+                self.render_message(agent, project_index, agent_index, index, window, cx)
+            }
             ChatRowKind::Queued(index) => {
                 let prompt = &agent.config.pending_prompts[index];
                 div().w_full().min_w(px(0.)).flex().justify_end().child(
@@ -210,8 +219,10 @@ impl Workspace {
     fn render_message(
         &self,
         agent: &AgentView,
+        project_index: usize,
+        agent_index: usize,
         index: usize,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let entry = &agent.messages[index];
@@ -230,32 +241,100 @@ impl Workspace {
         match entry.role {
             Role::User | Role::Agent => {
                 let from_user = entry.role == Role::User;
+                let reply_text = entry.text.clone();
+                let bubble = div()
+                    .max_w(relative(0.85))
+                    .min_w(px(0.))
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(rgb(if from_user { USER_BUBBLE } else { AGENT_BUBBLE }))
+                    .text_sm()
+                    .text_color(rgb(TEXT))
+                    .whitespace_normal()
+                    .when(from_user && shell.is_some(), |element| {
+                        element.child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(ACCENT))
+                                .child("Shell command"),
+                        )
+                    })
+                    .child(content);
                 div()
                     .w_full()
                     .min_w(px(0.))
                     .flex()
+                    .items_start()
+                    .gap_1()
                     .when(from_user, |element| element.justify_end())
-                    .child(
-                        div()
-                            .max_w(relative(0.85))
-                            .min_w(px(0.))
-                            .px_3()
-                            .py_2()
-                            .rounded_md()
-                            .bg(rgb(if from_user { USER_BUBBLE } else { AGENT_BUBBLE }))
-                            .text_sm()
-                            .text_color(rgb(TEXT))
-                            .whitespace_normal()
-                            .when(from_user && shell.is_some(), |element| {
-                                element.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(rgb(ACCENT))
-                                        .child("Shell command"),
+                    .child(bubble)
+                    .when(!from_user, |element| {
+                        let copy_state = window.use_keyed_state(
+                            format!("copy-state-{}-{index}", agent.config.id),
+                            cx,
+                            |_, _| CopyFeedback::default(),
+                        );
+                        let copied = copy_state.read(cx).copied;
+                        element.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    Button::new(format!("fork-{}-{index}", agent.config.id))
+                                        .ghost()
+                                        .compact()
+                                        .icon(IconName::Network)
+                                        .tooltip("Fork from this reply")
+                                        .disabled(agent.active_work)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.fork_conversation(
+                                                project_index,
+                                                agent_index,
+                                                index,
+                                                window,
+                                                cx,
+                                            );
+                                        })),
                                 )
-                            })
-                            .child(content),
-                    )
+                                .child(
+                                    Button::new(format!("copy-{}-{index}", agent.config.id))
+                                        .ghost()
+                                        .compact()
+                                        .icon(if copied {
+                                            IconName::Check
+                                        } else {
+                                            IconName::Copy
+                                        })
+                                        .tooltip(if copied { "Copied" } else { "Copy reply" })
+                                        .when(!copied, |button| {
+                                            button.on_click(move |_, _, cx| {
+                                                cx.write_to_clipboard(
+                                                    gpui::ClipboardItem::new_string(
+                                                        reply_text.clone(),
+                                                    ),
+                                                );
+                                                copy_state.update(cx, |state, cx| {
+                                                    state.copied = true;
+                                                    cx.notify();
+                                                });
+                                                let copy_state = copy_state.clone();
+                                                cx.spawn(async move |cx| {
+                                                    cx.background_executor()
+                                                        .timer(Duration::from_secs(2))
+                                                        .await;
+                                                    _ = copy_state.update(cx, |state, cx| {
+                                                        state.copied = false;
+                                                        cx.notify();
+                                                    });
+                                                })
+                                                .detach();
+                                            })
+                                        }),
+                                ),
+                        )
+                    })
             }
             Role::ContextReset => div()
                 .w_full()
@@ -587,6 +666,7 @@ mod tests {
             prompt_history: Vec::new(),
             was_working: false,
             session_has_activity: false,
+            fork_pending: false,
         })
     }
 

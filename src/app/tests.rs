@@ -159,6 +159,7 @@ fn agent(protocol: ProtocolVersion) -> AgentView {
         prompt_history: Vec::new(),
         was_working: false,
         session_has_activity: false,
+        fork_pending: false,
     });
     agent.protocol = Some(protocol);
     agent.session_id = Some("session-1".into());
@@ -261,6 +262,79 @@ fn resetting_context_reuses_agent_settings_without_reusing_session_state() {
     assert_eq!(reset.messages[1].text, "Earlier reply");
     assert_eq!(reset.messages[3].text, "New reply");
     assert_eq!(previous.messages.len(), 2);
+}
+
+#[test]
+fn fork_copies_history_through_selected_response_without_source_session_state() {
+    let mut source = agent(ProtocolVersion::V2);
+    source.config.pending_prompts.push("Queued work".into());
+    source.log(Role::User, "First question");
+    source.upsert_message(
+        Role::Agent,
+        "first-reply",
+        Some(&json!([{"type":"text","text":"First answer"}])),
+        false,
+    );
+    source.log(Role::User, "Later question");
+    source.log(Role::Agent, "Later answer");
+
+    let config = source.fork_config(2, 1).unwrap();
+    assert_eq!(config.id, 2);
+    assert_eq!(config.session_id, None);
+    assert_eq!(config.messages.len(), 2);
+    assert_eq!(config.messages[1].text, "First answer");
+    assert!(config.messages.iter().all(|entry| entry.key.is_none()));
+    assert_eq!(config.prompt_history, ["First question"]);
+    assert!(config.pending_prompts.is_empty());
+    assert!(config.fork_pending);
+    assert!(source.fork_config(3, 0).is_none());
+    assert_eq!(source.messages.len(), 4);
+
+    let restored: AgentConfig =
+        serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+    assert!(restored.fork_pending);
+}
+
+#[test]
+fn fork_supplies_only_active_conversation_to_first_prompt() {
+    let mut source = agent(ProtocolVersion::V1);
+    source.log(Role::User, "Old question");
+    source.log(Role::ContextReset, "Context reset");
+    source.log(Role::User, "Current question");
+    source.log(Role::Tool, "Reading file");
+    source.log(Role::Agent, "Current answer");
+    let config = source.fork_config(2, 4).unwrap();
+    let mut fork = AgentView::new(config);
+    fork.protocol = Some(ProtocolVersion::V1);
+    fork.session_id = Some("fork-session".into());
+    let command = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        "while IFS= read -r line; do printf '%s\\n' \"$line\"; done".into(),
+    ];
+    let (events_tx, events_rx) = mpsc::channel();
+    fork.connection = Some(Connection::spawn(2, &command, Path::new("/"), events_tx).unwrap());
+
+    fork.start_prompt("New direction".into()).unwrap();
+    let Event::Message { value, .. } = events_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("agent disconnected before receiving fork prompt");
+    };
+    let sent = value["params"]["prompt"][0]["text"].as_str().unwrap();
+    assert!(sent.contains("Current question"));
+    assert!(sent.contains("Current answer"));
+    assert!(sent.contains("New direction"));
+    assert!(!sent.contains("Old question"));
+    assert!(!sent.contains("Reading file"));
+    assert!(!fork.config.fork_pending);
+
+    fork.handle_prompt_response(&json!({"stopReason":"end_turn"}));
+    fork.start_prompt("Follow-up".into()).unwrap();
+    let Event::Message { value, .. } = events_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+    else {
+        panic!("agent disconnected before receiving follow-up");
+    };
+    assert_eq!(value["params"]["prompt"][0]["text"], "Follow-up");
 }
 
 #[test]

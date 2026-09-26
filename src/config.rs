@@ -65,6 +65,8 @@ pub struct AgentConfig {
     pub was_working: bool,
     #[serde(default)]
     pub session_has_activity: bool,
+    #[serde(default)]
+    pub fork_pending: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -100,6 +100,50 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(super) fn fork_conversation(
+        &mut self,
+        project_index: usize,
+        agent_index: usize,
+        response_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(source) = self
+            .projects
+            .get(project_index)
+            .and_then(|project| project.agents.get(agent_index))
+        else {
+            return;
+        };
+        if source.active_work {
+            return;
+        }
+        let Some(mut config) = source.fork_config(self.next_agent_id, response_index) else {
+            return;
+        };
+        config.messages.push(ChatEntry {
+            role: Role::System,
+            key: None,
+            text: "Forked here. The earlier conversation will be provided as context with your first message. Project files reflect their current state.".into(),
+        });
+        self.sidebar_order.push(config.id);
+        self.next_agent_id += 1;
+        let new_index = self.projects[project_index].agents.len();
+        self.projects[project_index]
+            .agents
+            .push(AgentView::new(config));
+        self.set_view(WorkspaceView::Conversation(SessionLocation {
+            project_index,
+            agent_index: new_index,
+        }));
+        self.connect(project_index, new_index);
+        self.notice = None;
+        self.persist();
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
     pub(super) fn connect(&mut self, project_index: usize, agent_index: usize) {
         let project = &mut self.projects[project_index];
         let agent = &mut project.agents[agent_index];
