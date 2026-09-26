@@ -32,6 +32,7 @@ Notable changes to Agentaps are recorded here.
 
 - New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.
+- The desktop platform section now presents build availability in the platform cards without extra introductory text.
 - The website presents Agentaps as a Rust and Apache-2.0 universal UI for ACP-compatible coding harnesses, highlights Linux, macOS, and Windows, and links to source build instructions while installers are unavailable.
 - The website logo uses horizontal strokes, and the landing page colors match the desktop app.
 - Desktop mobile access offers a provider choice when the SecretSpec default is unavailable and shows how to configure one permanently.
