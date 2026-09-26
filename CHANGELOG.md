@@ -32,7 +32,7 @@ Notable changes to Agentaps are recorded here.
 
 - New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.
-- The website logo uses taller upright strokes in the header and favicon.
+- The website logo uses horizontal strokes, and the landing page colors match the desktop app.
 - Desktop mobile access offers a provider choice when the SecretSpec default is unavailable and shows how to configure one permanently.
 - Archive and Mobile controls sit together as icon buttons in the desktop sidebar.
 - The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
