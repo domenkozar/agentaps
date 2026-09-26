@@ -134,7 +134,8 @@ impl Workspace {
         };
         let value = self.composer.read(cx).value().to_string();
         let prompt = submitted_prompt(&value);
-        if prompt.trim().is_empty() {
+        if prompt.trim().is_empty() || (prompt.starts_with('!') && shell_command(&prompt).is_none())
+        {
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             return;

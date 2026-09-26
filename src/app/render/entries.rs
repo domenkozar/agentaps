@@ -167,12 +167,13 @@ impl Workspace {
                         .py_2()
                         .rounded_md()
                         .bg(rgb(USER_BUBBLE))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(rgb(ACCENT))
-                                .child(format!("Queued {}", index + 1)),
-                        )
+                        .child(div().text_xs().text_color(rgb(ACCENT)).child(
+                            if shell_command(prompt).is_some() {
+                                format!("Queued {} · Shell command", index + 1)
+                            } else {
+                                format!("Queued {}", index + 1)
+                            },
+                        ))
                         .child(
                             div()
                                 .text_sm()
@@ -205,8 +206,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Div {
         let entry = &agent.messages[index];
+        let shell = (entry.role == Role::User)
+            .then(|| shell_command_in_message(&entry.text))
+            .flatten();
+        let display_text = shell
+            .map(|command| format!("!{command}"))
+            .unwrap_or_else(|| entry.text.clone());
         let text_id: gpui::ElementId = ("chat", agent.config.id).into();
-        let content = TextView::markdown((text_id, index.to_string()), entry.text.clone())
+        let content = TextView::markdown((text_id, index.to_string()), display_text)
             .style(self.chat_text_style(cx))
             .selectable(true)
             .text_sm()
@@ -230,6 +237,14 @@ impl Workspace {
                             .text_sm()
                             .text_color(rgb(TEXT))
                             .whitespace_normal()
+                            .when(from_user && shell.is_some(), |element| {
+                                element.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(ACCENT))
+                                        .child("Shell command"),
+                                )
+                            })
                             .child(content),
                     )
             }

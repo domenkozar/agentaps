@@ -523,19 +523,29 @@ impl Workspace {
             }
             chat = chat.child(menu);
         }
+        let shell_mode = self.composer.read(cx).value().starts_with('!');
         chat = chat.child(
-            div()
-                .p_4()
-                .flex()
-                .min_w(px(0.))
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .child(Textarea::new(&self.composer)),
-                ),
+            div().p_4().flex().min_w(px(0.)).child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .relative()
+                    .child(
+                        Textarea::new(&self.composer)
+                            .when(shell_mode, |textarea| textarea.pr(px(48.))),
+                    )
+                    .when(shell_mode, |element| {
+                        element.child(
+                            div()
+                                .absolute()
+                                .right(px(12.))
+                                .bottom(px(8.))
+                                .text_xs()
+                                .text_color(rgb(MUTED))
+                                .child("shell"),
+                        )
+                    }),
+            ),
         );
         chat
     }

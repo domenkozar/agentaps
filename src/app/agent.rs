@@ -319,9 +319,10 @@ impl AgentView {
     pub(super) fn start_prompt(&mut self, prompt: String) -> Result<(), String> {
         let session_id = self.session_id.clone().ok_or("Agent is still connecting")?;
         let id = self.next_request_id;
+        let agent_prompt = prompt_for_agent(&prompt);
         self.send(
             json!({"jsonrpc":"2.0","id":id,"method":"session/prompt","params":{
-                "sessionId":session_id,"prompt":[{"type":"text","text":prompt}]
+                "sessionId":session_id,"prompt":[{"type":"text","text":agent_prompt}]
             }}),
         )?;
         self.next_request_id += 1;

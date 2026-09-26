@@ -544,17 +544,24 @@ fn queued_prompts_reach_the_agent_in_order_after_each_turn() {
     ];
     let (events_tx, events_rx) = mpsc::channel();
     agent.connection = Some(Connection::spawn(1, &command, Path::new("/"), events_tx).unwrap());
-    agent.config.pending_prompts = vec!["First".into(), "Second".into()];
+    agent.config.pending_prompts = vec!["First".into(), "!printf '%s' hi".into()];
 
     assert!(!agent.start_next_queued_prompt());
     agent.handle_prompt_response(&json!({"stopReason":"end_turn"}));
-    for expected in ["First", "Second"] {
+    for (original, expected) in [
+        ("First", "First"),
+        (
+            "!printf '%s' hi",
+            "Run this shell command exactly as written, then report its output:\n\nprintf '%s' hi",
+        ),
+    ] {
         assert!(agent.start_next_queued_prompt());
         let Event::Message { value, .. } = events_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!("agent disconnected before receiving queued prompt");
         };
         assert_eq!(value["params"]["prompt"][0]["text"], expected);
+        assert_eq!(agent.messages.last().unwrap().text, original);
         agent.handle_prompt_response(&json!({"stopReason":"end_turn"}));
     }
     assert!(agent.config.pending_prompts.is_empty());
@@ -612,4 +619,27 @@ fn empty_sessions_are_not_restored() {
 fn submitting_keeps_explicit_newlines() {
     assert_eq!(submitted_prompt("first\nsecond\n"), "first\nsecond");
     assert_eq!(submitted_prompt("first\n\n"), "first\n");
+}
+
+#[test]
+fn shell_mode_requires_first_character_and_preserves_command_text() {
+    assert_eq!(
+        shell_command("!  printf 'hello'\n"),
+        Some("  printf 'hello'\n")
+    );
+    assert_eq!(shell_command(" !printf hello"), None);
+    assert_eq!(shell_command("! \n"), None);
+    assert_eq!(
+        shell_command_in_message("!printf hello"),
+        Some("printf hello")
+    );
+    assert_eq!(
+        shell_command_in_message(&prompt_for_agent("!printf hello")),
+        Some("printf hello")
+    );
+    assert_eq!(prompt_for_agent("ask ! for help"), "ask ! for help");
+    assert_eq!(
+        prompt_for_agent("!  printf 'hello'\nnext"),
+        "Run this shell command exactly as written, then report its output:\n\n  printf 'hello'\nnext"
+    );
 }

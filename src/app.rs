@@ -454,6 +454,26 @@ fn submitted_prompt(value: &str) -> String {
     value.strip_suffix('\n').unwrap_or(value).to_owned()
 }
 
+const SHELL_PROMPT_PREFIX: &str =
+    "Run this shell command exactly as written, then report its output:\n\n";
+
+fn shell_command(prompt: &str) -> Option<&str> {
+    prompt
+        .strip_prefix('!')
+        .filter(|command| !command.trim().is_empty())
+}
+
+fn shell_command_in_message(message: &str) -> Option<&str> {
+    shell_command(message).or_else(|| message.strip_prefix(SHELL_PROMPT_PREFIX))
+}
+
+fn prompt_for_agent(prompt: &str) -> String {
+    match shell_command(prompt) {
+        Some(command) => format!("{SHELL_PROMPT_PREFIX}{command}"),
+        None => prompt.to_owned(),
+    }
+}
+
 fn parse_available_commands(update: &Value) -> Vec<SlashCommand> {
     update["availableCommands"]
         .as_array()
