@@ -31,8 +31,10 @@ impl Workspace {
             match crate::mobile::start() {
                 Ok(server) => {
                     self.mobile = Some(server);
-                    self.notice =
-                        Some("Starting mobile access. Click Mobile again to copy the link.".into());
+                    self.notice = Some(
+                        "Starting mobile access. Select the phone icon again to copy the link."
+                            .into(),
+                    );
                 }
                 Err(error) => self.notice = Some(format!("Could not start mobile access: {error}")),
             }
@@ -82,8 +84,10 @@ impl Workspace {
                     self.mobile_endpoint_id = Some(endpoint_id);
                     if already_ready {
                         self.mobile_pairing_visible = false;
-                        self.notice =
-                            Some("Phone paired. Click Mobile to show a fresh pairing code.".into());
+                        self.notice = Some(
+                            "Phone paired. Select the phone icon to show a fresh pairing code."
+                                .into(),
+                        );
                     } else if let Some(link) = self.mobile_link() {
                         self.mobile_qr = QrCode::new(link.as_bytes()).ok().map(|qr| {
                             qr.to_colors()

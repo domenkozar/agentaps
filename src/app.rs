@@ -24,7 +24,6 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
     tooltip::Tooltip,
 };
-use gpui_component_assets::Assets;
 use serde_json::{Value, json};
 use std::{
     collections::HashSet,
@@ -37,6 +36,7 @@ use std::{
 };
 
 mod agent;
+mod assets;
 mod elicitation;
 mod mobile;
 mod render;
@@ -46,6 +46,7 @@ mod tests;
 mod tool_activity;
 
 use self::{agent::*, elicitation::*, tool_activity::*};
+use assets::AppAssets;
 
 enum DiffData {
     Full(
@@ -1779,7 +1780,7 @@ impl Drop for Workspace {
 
 pub(crate) fn run() {
     gpui_ce_platform::application()
-        .with_assets(Assets)
+        .with_assets(AppAssets)
         .run(|cx: &mut App| {
             gpui_component::init(cx);
             cx.bind_keys([KeyBinding::new(

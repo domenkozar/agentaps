@@ -30,7 +30,7 @@ pub struct PendingCommand {
 }
 
 const CREDENTIAL_NAME: &str = "MOBILE_CREDENTIALS";
-const CONFIGURE_PROVIDER: &str = "Configure a user-global SecretSpec provider with `secretspec config global init`, then retry Mobile";
+const CONFIGURE_PROVIDER: &str = "Configure a user-global SecretSpec provider with `secretspec config global init`, then select the phone icon again";
 
 fn random_token() -> String {
     hex::encode(SecretKey::generate().to_bytes())

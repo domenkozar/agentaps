@@ -82,14 +82,19 @@ fn workspace_view_keeps_sidebar_selection_exclusive() {
 }
 
 #[test]
-fn archive_icons_are_bundled() {
+fn sidebar_icons_are_bundled() {
     assert!(
-        gpui::AssetSource::load(&Assets, "icons/inbox.svg")
+        gpui::AssetSource::load(&AppAssets, "icons/inbox.svg")
             .unwrap()
             .is_some()
     );
     assert!(
-        gpui::AssetSource::load(&Assets, "icons/undo-2.svg")
+        gpui::AssetSource::load(&AppAssets, "icons/undo-2.svg")
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        gpui::AssetSource::load(&AppAssets, "icons/mobile.svg")
             .unwrap()
             .is_some()
     );
