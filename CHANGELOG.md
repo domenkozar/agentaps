@@ -11,6 +11,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Added
 
+- Diff buttons show live added and removed line counts without loading the full diff while closed.
 - Typing `@` in a prompt offers fuzzy file path completion from the current project.
 - Search fields show a clear button while typing, and Escape clears the current search.
 - Session headers let you choose from models offered by the connected agent.

@@ -298,13 +298,35 @@ impl Workspace {
 
     pub(super) fn poll_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
+        let project_index = self
+            .view
+            .displayed_session()
+            .map(|session| session.project_index);
+        if self.diff_watched_project != project_index {
+            self.diff_watched_project = project_index;
+            self.diff_watch_generation += 1;
+            self.diff_watcher = None;
+            self.diff_poll_at = None;
+            self.diff_refresh_due = project_index.map(|_| Instant::now());
+            self.diff_first_change_at = None;
+            if let Some(project_index) = project_index {
+                let generation = self.diff_watch_generation;
+                let path = self.projects[project_index].path.clone();
+                let watch_tx = self.diff_watch_tx.clone();
+                let watcher_tx = self.diff_watcher_tx.clone();
+                std::thread::spawn(move || {
+                    let watcher = crate::diff_watch::start(&path, generation, watch_tx);
+                    let _ = watcher_tx.send((generation, watcher));
+                });
+            }
+        }
         while let Ok((request_id, result)) = self.diff_rx.try_recv() {
             if request_id != self.diff_request_id {
                 continue;
             }
             self.diff_loading = false;
             match result {
-                Ok((files, stats, presentation, selected_file, rows)) => {
+                Ok(DiffData::Full(files, stats, presentation, selected_file, rows)) => {
                     let scroll_top = self.diff_list.logical_scroll_top();
                     if self
                         .diff_selected_file
@@ -327,16 +349,30 @@ impl Workspace {
                     self.diff_list =
                         ListState::new(self.diff_rows.len(), ListAlignment::Top, px(28.));
                     self.diff_list.scroll_to(scroll_top);
+                    self.diff_counts = (!stats.is_empty()).then(|| {
+                        stats.iter().copied().fold((0, 0), |total, count| {
+                            (total.0 + count.0, total.1 + count.1)
+                        })
+                    });
                     self.diff_files = files;
                     self.diff_file_stats = stats;
                     self.diff_error = None;
                 }
-                Err(error) => self.diff_error = Some(error),
+                Ok(DiffData::Counts(counts)) => {
+                    self.diff_counts = counts;
+                    self.diff_error = None;
+                }
+                Err(error) => {
+                    self.diff_counts = None;
+                    self.diff_files.clear();
+                    self.diff_file_stats.clear();
+                    self.diff_error = Some(error);
+                }
             }
             cx.notify();
         }
         while let Ok((generation, watcher)) = self.diff_watcher_rx.try_recv() {
-            if self.diff_visible && generation == self.diff_watch_generation {
+            if self.diff_watched_project.is_some() && generation == self.diff_watch_generation {
                 self.diff_watcher = watcher.ok();
                 if self.diff_watcher.is_none() {
                     self.diff_poll_at = Some(Instant::now() + Duration::from_secs(3));
@@ -345,7 +381,8 @@ impl Workspace {
         }
         let mut watched_change = false;
         while let Ok(generation) = self.diff_watch_rx.try_recv() {
-            watched_change |= self.diff_visible && generation == self.diff_watch_generation;
+            watched_change |=
+                self.diff_watched_project.is_some() && generation == self.diff_watch_generation;
         }
         let now = Instant::now();
         if watched_change {
@@ -357,10 +394,7 @@ impl Workspace {
             self.diff_refresh_due.get_or_insert(now);
             self.diff_poll_at = Some(now + Duration::from_secs(3));
         }
-        if self.diff_visible
-            && !self.diff_loading
-            && self.diff_refresh_due.is_some_and(|due| now >= due)
-        {
+        if !self.diff_loading && self.diff_refresh_due.is_some_and(|due| now >= due) {
             self.diff_refresh_due = None;
             self.diff_first_change_at = None;
             if let Some(session) = self.view.displayed_session() {

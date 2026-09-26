@@ -1,4 +1,5 @@
 use super::*;
+use crate::diff_view;
 
 impl Workspace {
     pub(super) fn render_conversation(
@@ -11,6 +12,7 @@ impl Workspace {
     ) -> Div {
         let project = &self.projects[project_index];
         let agent = &project.agents[agent_index];
+        let (added, removed) = self.diff_counts.unwrap_or_default();
         let viewport_width = f32::from(window.viewport_size().width);
         let sidebar_width = (viewport_width * self.sidebar_fraction).max(180.);
         let chat_width = viewport_width - sidebar_width - 6.;
@@ -314,7 +316,22 @@ impl Workspace {
                     .text_color(rgb(TEXT))
                     .cursor_pointer()
                     .hover(|style| style.bg(rgb(HOVER)))
-                    .child("Diff")
+                    .child(div().flex().items_center().gap_2().child("Diff").when(
+                        self.diff_counts.is_some(),
+                        |element| {
+                            element
+                                .child(
+                                    div()
+                                        .text_color(rgb(diff_view::ADDED_TEXT))
+                                        .child(format!("+{added}")),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(rgb(diff_view::REMOVED_TEXT))
+                                        .child(format!("-{removed}")),
+                                )
+                        },
+                    ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_diff(project_index, cx);
                     })),

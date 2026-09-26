@@ -46,16 +46,18 @@ mod tool_activity;
 
 use self::{agent::*, elicitation::*, tool_activity::*};
 
-type DiffLoadResult = Result<
-    (
+enum DiffData {
+    Full(
         Vec<DiffFile>,
         Vec<(usize, usize)>,
         DiffPresentation,
         Option<String>,
         Arc<Vec<DiffRow>>,
     ),
-    String,
->;
+    Counts(Option<(usize, usize)>),
+}
+
+type DiffLoadResult = Result<DiffData, String>;
 
 fn move_sidebar_id(order: &mut Vec<u64>, dragged: u64, target: u64) -> bool {
     let Some(from) = order.iter().position(|id| *id == dragged) else {
@@ -399,12 +401,14 @@ struct Workspace {
     diff_watcher_tx: Sender<(u64, notify::Result<notify::RecommendedWatcher>)>,
     diff_watcher_rx: Receiver<(u64, notify::Result<notify::RecommendedWatcher>)>,
     diff_watch_generation: u64,
+    diff_watched_project: Option<usize>,
     diff_watcher: Option<notify::RecommendedWatcher>,
     diff_refresh_due: Option<Instant>,
     diff_first_change_at: Option<Instant>,
     diff_poll_at: Option<Instant>,
     diff_loading: bool,
     diff_error: Option<String>,
+    diff_counts: Option<(usize, usize)>,
     diff_files: Vec<DiffFile>,
     diff_file_stats: Vec<(usize, usize)>,
     dirty: bool,
@@ -509,13 +513,24 @@ impl Workspace {
             self.prompt_recall = None;
             self.close_diff();
             self.diff_error = None;
-            self.diff_files.clear();
             self.diff_rows = Arc::new(Vec::new());
             self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
         }
         let project_index = view
             .displayed_session()
             .map(|session| session.project_index);
+        if self
+            .view
+            .displayed_session()
+            .map(|session| session.project_index)
+            != project_index
+        {
+            self.diff_request_id += 1;
+            self.diff_loading = false;
+            self.diff_counts = None;
+            self.diff_files.clear();
+            self.diff_file_stats.clear();
+        }
         if self.file_search_project != project_index {
             self.file_search_project = project_index;
             self.file_scan_generation += 1;
@@ -550,32 +565,12 @@ impl Workspace {
         self.diff_file_stats.clear();
         self.diff_rows = Arc::new(Vec::new());
         self.diff_list = ListState::new(0, ListAlignment::Top, px(28.));
-        self.diff_watch_generation += 1;
-        let generation = self.diff_watch_generation;
-        let path = self.projects[project_index].path.clone();
-        let watch_tx = self.diff_watch_tx.clone();
-        let watcher_tx = self.diff_watcher_tx.clone();
-        self.diff_watcher = None;
-        self.diff_poll_at = None;
-        self.diff_refresh_due = None;
-        self.diff_first_change_at = None;
         self.refresh_diff(project_index, cx);
-        std::thread::spawn(move || {
-            let watcher = crate::diff_watch::start(&path, generation, watch_tx);
-            let _ = watcher_tx.send((generation, watcher));
-        });
     }
 
     fn close_diff(&mut self) {
         self.diff_visible = false;
         self.diff_selected_file = None;
-        self.diff_request_id += 1;
-        self.diff_loading = false;
-        self.diff_watcher = None;
-        self.diff_watch_generation += 1;
-        self.diff_refresh_due = None;
-        self.diff_first_change_at = None;
-        self.diff_poll_at = None;
     }
 
     fn refresh_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
@@ -584,19 +579,24 @@ impl Workspace {
         let path = self.projects[project_index].path.clone();
         let presentation = self.diff_presentation;
         let selected_file = self.diff_selected_file.clone();
+        let visible = self.diff_visible;
         let tx = self.diff_tx.clone();
         self.diff_loading = true;
         self.diff_error = None;
         std::thread::spawn(move || {
-            let result = crate::git_diff::load(&path).map(|files| {
-                let stats = files.iter().map(crate::diff_view::stats).collect();
-                let rows = Arc::new(diff_rows_for_file(
-                    &files,
-                    selected_file.as_deref(),
-                    presentation,
-                ));
-                (files, stats, presentation, selected_file, rows)
-            });
+            let result = if visible {
+                crate::git_diff::load(&path).map(|files| {
+                    let stats = files.iter().map(crate::diff_view::stats).collect();
+                    let rows = Arc::new(diff_rows_for_file(
+                        &files,
+                        selected_file.as_deref(),
+                        presentation,
+                    ));
+                    DiffData::Full(files, stats, presentation, selected_file, rows)
+                })
+            } else {
+                crate::git_diff::line_counts(&path).map(DiffData::Counts)
+            };
             let _ = tx.send((request_id, result));
         });
         cx.notify();
@@ -828,12 +828,14 @@ impl Workspace {
             diff_watcher_tx,
             diff_watcher_rx,
             diff_watch_generation: 0,
+            diff_watched_project: None,
             diff_watcher: None,
             diff_refresh_due: None,
             diff_first_change_at: None,
             diff_poll_at: None,
             diff_loading: false,
             diff_error: None,
+            diff_counts: None,
             diff_files: Vec::new(),
             diff_file_stats: Vec::new(),
             dirty: migrate_config,

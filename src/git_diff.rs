@@ -9,9 +9,72 @@ use std::{
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const CONTEXT_LINES: usize = 3;
 
+enum Change<'a> {
+    Text {
+        before: &'a str,
+        after: &'a str,
+        had_head_entry: bool,
+        has_worktree_entry: bool,
+    },
+    Note(&'static str),
+}
+
 /// Read the selected checkout's current files against HEAD. Includes staged,
 /// unstaged, and untracked paths reported by Git, while respecting ignore rules.
 pub fn load(path: &Path) -> Result<Vec<File>, String> {
+    scan(path, |path, change| match change {
+        Change::Note(note) => Some(File {
+            path,
+            hunks: Vec::new(),
+            note: Some(note.into()),
+        }),
+        Change::Text {
+            before,
+            after,
+            had_head_entry,
+            has_worktree_entry,
+        } => {
+            let hunks = text_hunks(before, after);
+            let note = (hunks.is_empty() && before == after).then(|| {
+                if !had_head_entry {
+                    "Empty file added".into()
+                } else if !has_worktree_entry {
+                    "Empty file deleted".into()
+                } else {
+                    "Git status changed without a text difference".into()
+                }
+            });
+            (!hunks.is_empty() || note.is_some()).then_some(File { path, hunks, note })
+        }
+    })
+}
+
+/// Count changed lines without creating hunks or display rows.
+pub fn line_counts(path: &Path) -> Result<Option<(usize, usize)>, String> {
+    let counts = scan(path, |_, change| match change {
+        Change::Note(_) => Some((0, 0)),
+        Change::Text { before, after, .. } => {
+            let input = InternedInput::new(before, after);
+            let mut diff = Diff::compute(Algorithm::Histogram, &input);
+            diff.postprocess_lines(&input);
+            let added = diff.count_additions() as usize;
+            let removed = diff.count_removals() as usize;
+            (added != 0 || removed != 0 || before == after).then_some((added, removed))
+        }
+    })?;
+    if counts.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(counts.into_iter().fold((0, 0), |total, count| {
+            (total.0 + count.0, total.1 + count.1)
+        })))
+    }
+}
+
+fn scan<T>(
+    path: &Path,
+    mut visit: impl FnMut(String, Change<'_>) -> Option<T>,
+) -> Result<Vec<T>, String> {
     let repo = gix::discover(path).map_err(|error| error.to_string())?;
     let workdir = repo
         .workdir()
@@ -77,11 +140,9 @@ pub fn load(path: &Path) -> Result<Vec<File>, String> {
         let old = match head_entry {
             Some((mode, oid)) => {
                 if mode.kind() == gix::object::tree::EntryKind::Commit {
-                    files.push(File {
-                        path: label,
-                        hunks: Vec::new(),
-                        note: Some("Git submodule changed".into()),
-                    });
+                    if let Some(file) = visit(label, Change::Note("Git submodule changed")) {
+                        files.push(file);
+                    }
                     continue;
                 }
                 if repo
@@ -90,11 +151,9 @@ pub fn load(path: &Path) -> Result<Vec<File>, String> {
                     .size()
                     > MAX_FILE_BYTES
                 {
-                    files.push(File {
-                        path: label,
-                        hunks: Vec::new(),
-                        note: Some("Large file, diff unavailable".into()),
-                    });
+                    if let Some(file) = visit(label, Change::Note("Large file, diff unavailable")) {
+                        files.push(file);
+                    }
                     continue;
                 }
                 repo.find_blob(oid)
@@ -112,55 +171,41 @@ pub fn load(path: &Path) -> Result<Vec<File>, String> {
                 .map(|target| target.to_string_lossy().into_owned().into_bytes())
                 .map_err(|error| format!("{}: {error}", absolute.display()))?,
             Ok(metadata) if metadata.is_file() && metadata.len() > MAX_FILE_BYTES => {
-                files.push(File {
-                    path: label,
-                    hunks: Vec::new(),
-                    note: Some("Large file, diff unavailable".into()),
-                });
+                if let Some(file) = visit(label, Change::Note("Large file, diff unavailable")) {
+                    files.push(file);
+                }
                 continue;
             }
             Ok(metadata) if metadata.is_file() => {
                 fs::read(&absolute).map_err(|error| format!("{}: {error}", absolute.display()))?
             }
             Ok(_) => {
-                files.push(File {
-                    path: label,
-                    hunks: Vec::new(),
-                    note: Some("Directory or non-file change".into()),
-                });
+                if let Some(file) = visit(label, Change::Note("Directory or non-file change")) {
+                    files.push(file);
+                }
                 continue;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(format!("{}: {error}", absolute.display())),
         };
-        let (hunks, note) =
-            if old.len() as u64 > MAX_FILE_BYTES || new.len() as u64 > MAX_FILE_BYTES {
-                (Vec::new(), Some("Large file, diff unavailable".into()))
-            } else if old.contains(&0) || new.contains(&0) {
-                (Vec::new(), Some("Binary file changed".into()))
-            } else if let (Ok(before), Ok(after)) =
-                (std::str::from_utf8(&old), std::str::from_utf8(&new))
-            {
-                let hunks = text_hunks(before, after);
-                let note = (hunks.is_empty() && old == new).then(|| {
-                    if !had_head_entry {
-                        "Empty file added".into()
-                    } else if !has_worktree_entry {
-                        "Empty file deleted".into()
-                    } else {
-                        "Git status changed without a text difference".into()
-                    }
-                });
-                (hunks, note)
-            } else {
-                (Vec::new(), Some("Non-UTF-8 file changed".into()))
-            };
-        if !hunks.is_empty() || note.is_some() {
-            files.push(File {
-                path: label,
-                hunks,
-                note,
-            });
+        let change = if old.len() as u64 > MAX_FILE_BYTES || new.len() as u64 > MAX_FILE_BYTES {
+            Change::Note("Large file, diff unavailable")
+        } else if old.contains(&0) || new.contains(&0) {
+            Change::Note("Binary file changed")
+        } else if let (Ok(before), Ok(after)) =
+            (std::str::from_utf8(&old), std::str::from_utf8(&new))
+        {
+            Change::Text {
+                before,
+                after,
+                had_head_entry,
+                has_worktree_entry,
+            }
+        } else {
+            Change::Note("Non-UTF-8 file changed")
+        };
+        if let Some(file) = visit(label, change) {
+            files.push(file);
         }
     }
     Ok(files)
@@ -325,6 +370,7 @@ mod tests {
             "-qm",
             "initial",
         ]);
+        assert_eq!(line_counts(&path).unwrap(), None);
         fs::write(path.join("staged.txt"), "after\n").unwrap();
         git(&["add", "staged.txt"]);
         fs::write(path.join("unstaged.txt"), "after\n").unwrap();
@@ -334,6 +380,16 @@ mod tests {
         let names: Vec<_> = files.iter().map(|file| file.path.as_str()).collect();
         assert_eq!(names, ["staged.txt", "unstaged.txt", "untracked.txt"]);
         assert!(files.iter().all(|file| !file.hunks.is_empty()));
+        let expected = files.iter().map(crate::diff_view::stats).fold(
+            (0, 0),
+            |(added, removed), (file_added, file_removed)| {
+                (added + file_added, removed + file_removed)
+            },
+        );
+        assert_eq!(line_counts(&path).unwrap(), Some(expected));
+        fs::write(path.join("binary.bin"), b"\0").unwrap();
+        fs::write(path.join("empty.txt"), "").unwrap();
+        assert_eq!(line_counts(&path).unwrap(), Some(expected));
         fs::remove_dir_all(path).unwrap();
     }
 }
