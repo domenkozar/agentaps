@@ -145,6 +145,8 @@ impl Workspace {
     }
 
     pub(super) fn connect(&mut self, project_index: usize, agent_index: usize) {
+        let agent_id = self.projects[project_index].agents[agent_index].config.id;
+        self.deferred_connections.retain(|id| *id != agent_id);
         let project = &mut self.projects[project_index];
         let agent = &mut project.agents[agent_index];
         match Connection::spawn(
@@ -186,12 +188,15 @@ impl Workspace {
             return;
         }
         let agent = &mut self.projects[project_index].agents[agent_index];
-        let Some(_) = agent.session_id.as_ref() else {
-            self.notice = Some("Agent is still connecting".into());
+        if agent.status == Status::Error {
+            self.notice = Some("Agent is not connected".into());
             cx.notify();
             return;
-        };
-        if agent.active_work || !agent.config.pending_prompts.is_empty() {
+        }
+        if agent.status == Status::Connecting
+            || agent.active_work
+            || !agent.config.pending_prompts.is_empty()
+        {
             agent.config.prompt_history.push(prompt.clone());
             agent.config.pending_prompts.push(prompt);
             self.dirty = true;
@@ -199,6 +204,11 @@ impl Workspace {
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.notice = None;
+            cx.notify();
+            return;
+        }
+        if agent.session_id.is_none() {
+            self.notice = Some("Agent is not connected".into());
             cx.notify();
             return;
         }
@@ -344,6 +354,33 @@ impl Workspace {
 
     pub(super) fn poll_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
+        if !self.deferred_connections.is_empty() {
+            let visible_ready = self.view.displayed_session().is_some_and(|session| {
+                self.projects[session.project_index].agents[session.agent_index].status
+                    != Status::Connecting
+            });
+            if visible_ready
+                || self
+                    .deferred_connections_deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                let agent_id = self.deferred_connections.remove(0);
+                if let Some((project_index, agent_index)) = self
+                    .projects
+                    .iter()
+                    .enumerate()
+                    .find_map(|(project_index, project)| {
+                        project
+                            .agents
+                            .iter()
+                            .position(|agent| agent.config.id == agent_id && !agent.config.archived)
+                            .map(|agent_index| (project_index, agent_index))
+                    })
+                {
+                    self.connect(project_index, agent_index);
+                }
+            }
+        }
         let project_index = self
             .view
             .displayed_session()

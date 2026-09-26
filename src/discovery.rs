@@ -68,6 +68,7 @@ pub fn installed_agents() -> Vec<AgentChoice> {
                 command: vec![
                     "npx".into(),
                     "-y".into(),
+                    "--prefer-offline".into(),
                     "@agentclientprotocol/codex-acp".into(),
                 ],
             });
@@ -79,6 +80,7 @@ pub fn installed_agents() -> Vec<AgentChoice> {
                 command: vec![
                     "npx".into(),
                     "-y".into(),
+                    "--prefer-offline".into(),
                     "@agentclientprotocol/claude-agent-acp".into(),
                 ],
             });

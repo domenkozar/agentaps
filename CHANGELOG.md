@@ -23,6 +23,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Changed
 
+- New sessions accept a first message while connecting and send it when the agent is ready. Cached npx adapters can start without a package freshness check.
 - Running tool activity uses the same status dot as a working agent.
 - The Stop agent control uses a stop-recording icon and matches the conversation action buttons.
 - Conversation headers keep agent settings and Reset context on the left, project and Diff on the right, and stay compact in narrow windows.
@@ -31,6 +32,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Fixed
 
+- The visible saved session connects before other sessions on startup, and connection replies are handled sooner.
 - File path completion adds a space and closes its suggestion menu.
 - Diff review opens promptly and shows loading progress while checkout changes are read.
 

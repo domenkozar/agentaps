@@ -368,6 +368,8 @@ struct Workspace {
     next_agent_id: u64,
     events_tx: Sender<Event>,
     events_rx: Receiver<Event>,
+    deferred_connections: Vec<u64>,
+    deferred_connections_deadline: Option<Instant>,
     folders_rx: Receiver<Vec<PathBuf>>,
     folder_search: FolderSearch,
     folder_scan_complete: bool,
@@ -553,6 +555,14 @@ fn completed_slash_text(command: &SlashCommand) -> String {
 
 impl Workspace {
     fn set_view(&mut self, view: WorkspaceView) {
+        if let Some(session) = view.displayed_session() {
+            let agent_id = self.projects[session.project_index].agents[session.agent_index]
+                .config
+                .id;
+            if self.deferred_connections.contains(&agent_id) {
+                self.connect(session.project_index, session.agent_index);
+            }
+        }
         if self.view.displayed_session() != view.displayed_session() {
             self.prompt_recall = None;
             self.close_diff();
@@ -838,6 +848,8 @@ impl Workspace {
             next_agent_id,
             events_tx,
             events_rx,
+            deferred_connections: Vec::new(),
+            deferred_connections_deadline: None,
             folders_rx,
             folder_search,
             folder_scan_complete: false,
@@ -897,7 +909,8 @@ impl Workspace {
                 {
                     continue;
                 }
-                this.connect(project_index, agent_index);
+                this.deferred_connections
+                    .push(this.projects[project_index].agents[agent_index].config.id);
                 selected.get_or_insert(SessionLocation {
                     project_index,
                     agent_index,
@@ -928,6 +941,9 @@ impl Workspace {
         }
         if let Some(session) = selected {
             this.set_view(WorkspaceView::Conversation(session));
+            if !this.deferred_connections.is_empty() {
+                this.deferred_connections_deadline = Some(Instant::now() + Duration::from_secs(2));
+            }
             this.composer
                 .update(cx, |input, cx| input.focus(window, cx));
         } else {
@@ -956,45 +972,59 @@ impl Workspace {
         }
         let background_executor = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
-            let mut ticks = 0u32;
+            let mut tick_interval = Duration::from_millis(25);
+            let mut last_branch_refresh = Instant::now();
+            let mut fast_poll_session = None;
+            let mut fast_poll_started = Instant::now();
             loop {
-                background_executor.timer(Duration::from_millis(100)).await;
-                if this
-                    .update_in(cx, |this, window, cx| {
-                        this.poll_events(window, cx);
-                        if let Ok(mut folders) = this.folders_rx.try_recv() {
-                            folders
-                                .extend(this.projects.iter().map(|project| project.path.clone()));
-                            folders.sort();
-                            folders.dedup();
-                            this.folder_search.set_paths(&folders);
-                            this.folder_scan_complete = true;
+                background_executor.timer(tick_interval).await;
+                let Ok(connecting_session) = this.update_in(cx, |this, window, cx| {
+                    this.poll_events(window, cx);
+                    if let Ok(mut folders) = this.folders_rx.try_recv() {
+                        folders.extend(this.projects.iter().map(|project| project.path.clone()));
+                        folders.sort();
+                        folders.dedup();
+                        this.folder_search.set_paths(&folders);
+                        this.folder_scan_complete = true;
+                        cx.notify();
+                    }
+                    if this.folder_search.tick() {
+                        cx.notify();
+                    }
+                    while let Ok(generation) = this.file_scan_rx.try_recv() {
+                        if this.file_scan_generation == generation
+                            && let Some(search) = this.file_search.as_mut()
+                        {
+                            search.scan_complete();
                             cx.notify();
                         }
-                        if this.folder_search.tick() {
-                            cx.notify();
-                        }
-                        while let Ok(generation) = this.file_scan_rx.try_recv() {
-                            if this.file_scan_generation == generation
-                                && let Some(search) = this.file_search.as_mut()
-                            {
-                                search.scan_complete();
-                                cx.notify();
-                            }
-                        }
-                        if this.file_search.as_mut().is_some_and(FileSearch::tick) {
-                            cx.notify();
-                        }
-                        ticks += 1;
-                        if ticks >= 50 {
-                            ticks = 0;
-                            this.refresh_branches(cx);
-                        }
+                    }
+                    if this.file_search.as_mut().is_some_and(FileSearch::tick) {
+                        cx.notify();
+                    }
+                    if last_branch_refresh.elapsed() >= Duration::from_secs(5) {
+                        last_branch_refresh = Instant::now();
+                        this.refresh_branches(cx);
+                    }
+                    this.view.displayed_session().and_then(|session| {
+                        let agent =
+                            &this.projects[session.project_index].agents[session.agent_index];
+                        (agent.status == Status::Connecting).then_some(agent.config.id)
                     })
-                    .is_err()
-                {
+                }) else {
                     break;
+                };
+                if fast_poll_session != connecting_session {
+                    fast_poll_session = connecting_session;
+                    fast_poll_started = Instant::now();
                 }
+                tick_interval = if connecting_session.is_some()
+                    && fast_poll_started.elapsed() < Duration::from_secs(10)
+                {
+                    Duration::from_millis(25)
+                } else {
+                    Duration::from_millis(100)
+                };
             }
         })
         .detach();
@@ -1264,11 +1294,14 @@ impl Workspace {
         self.projects[project_index]
             .agents
             .push(AgentView::new(config));
+        self.connect(project_index, agent_index);
+        if !self.deferred_connections.is_empty() {
+            self.deferred_connections_deadline = Some(Instant::now() + Duration::from_secs(2));
+        }
         self.set_view(WorkspaceView::Conversation(SessionLocation {
             project_index,
             agent_index,
         }));
-        self.connect(project_index, agent_index);
         self.notice = None;
         self.persist();
         self.composer
