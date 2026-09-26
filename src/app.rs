@@ -266,6 +266,7 @@ struct ProjectView {
 struct AgentDrag {
     id: u64,
     label: String,
+    order_index: usize,
 }
 
 impl Render for AgentDrag {

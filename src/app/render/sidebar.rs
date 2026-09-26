@@ -34,6 +34,11 @@ impl Workspace {
                 index == self.sidebar_selection
             };
             let agent_id = agent.config.id;
+            let order_index = self
+                .sidebar_order
+                .iter()
+                .position(|id| *id == agent_id)
+                .unwrap_or(usize::MAX);
             let row_group = format!("agent-row-{agent_id}");
             let row = div()
                 .id(("agent", agent_id))
@@ -69,10 +74,19 @@ impl Workspace {
                             AgentDrag {
                                 id: agent_id,
                                 label: name.clone(),
+                                order_index,
                             },
                             |drag: &AgentDrag, _, _, cx| cx.new(|_| drag.clone()),
                         )
-                        .drag_over::<AgentDrag>(|style, _, _, _| style.bg(rgb(DROP_TARGET)))
+                        .drag_over::<AgentDrag>(move |style, drag, _, _| {
+                            if drag.id == agent_id {
+                                style
+                            } else if drag.order_index < order_index {
+                                style.border_b_2().border_color(rgb(ACCENT))
+                            } else {
+                                style.border_t_2().border_color(rgb(ACCENT))
+                            }
+                        })
                         .on_drop(cx.listener(move |this, drag: &AgentDrag, _, cx| {
                             this.move_agent(drag.id, agent_id, cx)
                         }))
