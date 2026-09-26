@@ -861,11 +861,13 @@ impl MobileView {
                                 }) {
                                     view.pending_new_agent = None;
                                 }
-                                if view.pending_new_agent.is_none() && view.selected.is_none_or(|id| {
-                                    !view.projects.iter().any(|project| {
-                                        project.agents.iter().any(|agent| agent.id == id)
+                                if view.pending_new_agent.is_none()
+                                    && view.selected.is_none_or(|id| {
+                                        !view.projects.iter().any(|project| {
+                                            project.agents.iter().any(|agent| agent.id == id)
+                                        })
                                     })
-                                }) {
+                                {
                                     view.selected = view
                                         .projects
                                         .iter()
@@ -906,7 +908,11 @@ impl MobileView {
                             break;
                         }
                     }
-                    Ok(Response::Accepted | Response::Paired { .. } | Response::SessionCreated { .. }) => {}
+                    Ok(
+                        Response::Accepted
+                        | Response::Paired { .. }
+                        | Response::SessionCreated { .. },
+                    ) => {}
                 }
                 cx.background_executor()
                     .timer(Duration::from_millis(800))
@@ -949,14 +955,27 @@ impl MobileView {
         }
     }
 
-    fn start_new_session(&mut self, command: Vec<String>, name: Option<String>, cx: &mut Context<Self>) {
+    fn start_new_session(
+        &mut self,
+        command: Vec<String>,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if self.creating_session {
             return;
         }
         let Some(project) = self.new_project.clone() else {
             return;
         };
-        if self.outbound.try_send(Command::NewSession { project, command, name }).is_ok() {
+        if self
+            .outbound
+            .try_send(Command::NewSession {
+                project,
+                command,
+                name,
+            })
+            .is_ok()
+        {
             self.creating_session = true;
             self.action_error = None;
         } else {
@@ -1254,7 +1273,12 @@ impl Render for MobileView {
                             .on_click(cx.listener(|this, _, _, cx| this.back_from_new_session(cx))),
                     )
                     .child(div().text_lg().child("Choose agent"))
-                    .child(div().text_sm().text_color(rgb(MUTED)).child(project.clone()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(MUTED))
+                            .child(project.clone()),
+                    )
                     .when(self.creating_session, |element| {
                         element.child(div().text_color(rgb(MUTED)).child("Starting session…"))
                     })

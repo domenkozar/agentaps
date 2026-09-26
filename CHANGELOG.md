@@ -44,6 +44,7 @@ Notable changes to Agentaps are recorded here.
 ### Fixed
 
 - The visible saved session connects before other sessions on startup, and connection replies are handled sooner.
+- Desktop and browser use current GPUI CE, including WebGL2 fallback and mobile input support.
 - File path completion adds a space and closes its suggestion menu.
 - Finger swipes scroll browser conversations, and phone keyboards can type into the browser chat composer while the page adjusts to the keyboard.
 - The browser conversation is easier to read on phones, with distinct message roles, formatted replies, a visible composer, and automatic scrolling to new replies when already at the bottom.

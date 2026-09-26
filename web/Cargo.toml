@@ -31,6 +31,25 @@ lto = "thin"
 codegen-units = 1
 
 [patch.crates-io]
-gpui_ce_web = { path = "../vendor/gpui_ce_web" }
-gpui_ce_wgpu = { path = "../vendor/gpui_ce_wgpu" }
-gpui_ce_components_assets = { path = "../vendor/gpui_ce_components_assets" }
+# Component fixes pending in gpui-ce/gpui-component PRs 1 and 2.
+gpui_ce_components = { git = "https://github.com/domenkozar/gpui-kit", rev = "0622a5332bb1da6e115ba5a8b8afecf4cddbd8b1" }
+gpui_ce_components_base = { git = "https://github.com/domenkozar/gpui-kit", rev = "0622a5332bb1da6e115ba5a8b8afecf4cddbd8b1" }
+gpui-ce = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_apple = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_collections = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_derive_refineable = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_linux = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_macos = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_macros = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_media = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_platform = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_refineable = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_render = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_scheduler = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_shared_string = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_sum_tree = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_util = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_web = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_wgpu = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_windows = { git = "https://github.com/gpui-ce/gpui-ce", rev = "17d9c8e8fdb30a329d817ca06bff424e8e848f1a" }
+gpui_ce_components_assets = { git = "https://github.com/domenkozar/gpui-kit", rev = "0622a5332bb1da6e115ba5a8b8afecf4cddbd8b1" }
