@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#10151c">
-    <meta name="description" content="Bring your existing ACP-compatible coding agent to one workspace on Linux, macOS, or Windows, over SSH, and in your phone browser.">
+    <meta name="description" content="Use your coding harness locally or over SSH using ACP, then securely connect from the web with Agentaps.">
     <title>Agentaps | A universal UI for coding harnesses</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
@@ -24,7 +24,7 @@
         </a>
         <nav aria-label="Main navigation">
           <a href="#why-agentaps">Why Agentaps</a>
-          <a href="#downloads">Downloads</a>
+          <a href="#downloads">Desktop</a>
           <a class="nav-connect" href="/connect/">Web Connect <span aria-hidden="true">↗</span></a>
         </nav>
       </header>
@@ -34,12 +34,17 @@
           <div class="hero-copy">
             <p class="eyebrow"><span class="eyebrow-line"></span> BRING YOUR EXISTING AGENT HARNESS</p>
             <h1 id="hero-title">A universal UI<br><span>for coding</span><br><span>harnesses.</span></h1>
-            <p class="hero-description">Agentaps speaks the Agent Client Protocol (ACP), so you can use the coding harness you already know, directly or through an ACP adapter. Run agents locally or over SSH, then pick up from your phone browser.</p>
+            <p class="hero-description">Use your coding harness locally or over SSH using <a href="https://agentclientprotocol.com/get-started/introduction">ACP</a>, then securely connect from the web with Agentaps.</p>
             <div class="hero-actions">
               <a class="button button-primary" href="/connect/">Open Web Connect <span aria-hidden="true">↗</span></a>
               <a class="button button-secondary" href="https://github.com/domenkozar/agentaps#run">Build from source <span aria-hidden="true">↗</span></a>
             </div>
-            <p class="hero-platforms"><span>Desktop platforms</span> <a href="#downloads">Linux</a> <a href="#downloads">macOS</a> <a href="#downloads">Windows</a></p>
+            <div class="hero-platforms" id="downloads" role="group" aria-label="Desktop downloads">
+              <span class="hero-platforms-label">Desktop platforms</span>
+              <span class="platform-download" data-platform="linux"><span class="platform-unavailable">Linux <small>Soon</small></span></span>
+              <span class="platform-download" data-platform="macos"><span class="platform-unavailable">macOS <small>Soon</small></span></span>
+              <span class="platform-download" data-platform="windows"><span class="platform-unavailable">Windows <small>Soon</small></span></span>
+            </div>
             <p class="hero-note">Built with Rust · Apache-2.0 · No mobile app required</p>
           </div>
 
@@ -92,18 +97,6 @@
             <article class="feature-card"><span class="feature-icon">↗</span><h3>Work over SSH</h3><p>Start agents on a server through your existing SSH setup and follow the conversation locally.</p></article>
             <article class="feature-card"><span class="feature-icon">◌</span><h3>Continue on your phone</h3><p>Pair your browser with a QR code, unlock your saved connection, and control sessions without installing an app.</p></article>
           </div>
-        </section>
-
-        <section class="downloads" id="downloads" aria-labelledby="downloads-title">
-          <div class="section-intro downloads-intro">
-            <div><p class="eyebrow">DESKTOP APP</p><h2 id="downloads-title">Get Agentaps.</h2></div>
-          </div>
-          <div class="download-grid" id="download-grid">
-            <article class="download-card" data-platform="linux"><div class="platform-icon" aria-hidden="true">◧</div><h3>Linux</h3><p>Run your agents on your desktop.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
-            <article class="download-card" data-platform="macos"><div class="platform-icon" aria-hidden="true">⌘</div><h3>macOS</h3><p>Stay with your projects across devices.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
-            <article class="download-card" data-platform="windows"><div class="platform-icon" aria-hidden="true">⊞</div><h3>Windows</h3><p>Bring your coding agents together.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
-          </div>
-          <p class="source-link">Prefer to build it yourself? <a href="https://github.com/domenkozar/agentaps#run">See source installation instructions <span aria-hidden="true">↗</span></a></p>
         </section>
 
         <section class="connect-panel" aria-labelledby="connect-title">

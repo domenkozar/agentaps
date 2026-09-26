@@ -18,7 +18,7 @@ a:focus-visible { outline: 2px solid #8fc5ec; outline-offset: 4px; }
 .brand-mark span:nth-child(2) { width: 15px; opacity: .75; }
 .brand-mark span:nth-child(3) { width: 18px; opacity: .5; }
 .site-header nav { display: flex; align-items: center; gap: 36px; font-size: 14px; font-weight: 600; color: #9aaaba; }
-.site-header nav a:hover, .site-footer a:hover, .source-link a:hover { color: #b6dcf4; }
+.site-header nav a:hover, .site-footer a:hover { color: #b6dcf4; }
 .site-header nav .nav-connect { padding: 11px 15px; border: 1px solid rgba(143, 197, 236, .38); border-radius: 9px; color: #e0effc; background: rgba(48, 75, 96, .45); }
 .nav-connect span, .button span { margin-left: 10px; }
 .hero { min-height: 690px; display: grid; grid-template-columns: .9fr 1.1fr; gap: 42px; align-items: center; padding: 82px 0 102px; }
@@ -30,6 +30,7 @@ h1, h2, h3 { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
 h1 { margin-bottom: 23px; font-size: clamp(48px, 5.25vw, 76px); line-height: 1.05; letter-spacing: -.07em; font-weight: 600; }
 h1 span { color: #8fc5ec; }
 .hero-description { max-width: 520px; margin-bottom: 34px; color: #aab9c9; font-size: 18px; line-height: 1.7; }
+.hero-description a { color: #8fc5ec; text-decoration: underline; text-underline-offset: 3px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .button { display: inline-flex; justify-content: center; align-items: center; min-height: 52px; padding: 0 21px; border-radius: 10px; font-size: 14px; font-weight: 700; transition: transform .16s, background .16s, border-color .16s; }
 .button:hover { transform: translateY(-2px); }
@@ -38,9 +39,13 @@ h1 span { color: #8fc5ec; }
 .button-secondary { border: 1px solid #334253; color: #edf2f7; background: #202a36; }
 .button-secondary:hover { border-color: #8fc5ec; background: #293747; }
 .hero-platforms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 23px 0 0; color: #9aaaba; font-size: 12px; }
-.hero-platforms span { margin-right: 4px; }
-.hero-platforms a { padding: 6px 9px; border: 1px solid #334253; border-radius: 6px; color: #edf2f7; background: #202a36; }
-.hero-platforms a:hover { border-color: #8fc5ec; }
+.hero-platforms-label { margin-right: 4px; }
+.platform-download { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; }
+.platform-download > span, .platform-download > a { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 9px; border: 1px solid #334253; border-radius: 6px; overflow-wrap: anywhere; background: #202a36; }
+.platform-unavailable { color: #9aaaba; }
+.platform-unavailable small { color: #8193a5; font-size: 10px; }
+.platform-link { color: #edf2f7; }
+.platform-link:hover { border-color: #8fc5ec; color: #b6dcf4; }
 .hero-note { margin: 12px 0 0; color: #8193a5; font-size: 12px; }
 .product-visual { position: relative; height: 550px; display: flex; align-items: center; margin-right: -46px; }
 .visual-glow { position: absolute; inset: 16% 3% 5% 10%; border-radius: 50%; filter: blur(55px); background: radial-gradient(ellipse, rgba(79, 139, 196, .24), rgba(87, 110, 179, .1) 55%, transparent 75%); }
@@ -90,25 +95,13 @@ h1 span { color: #8fc5ec; }
 .phone-session > span:last-child { color: #9aaaba; }
 .phone-bottom { position: absolute; bottom: 15px; left: 18px; color: #9aaaba; font-size: 8px; }
 .phone-bottom .status-dot { width: 4px; height: 4px; margin-left: 3px; }
-.features, .downloads { padding: 84px 0 94px; border-top: 1px solid rgba(143, 197, 236, .12); }
+.features { padding: 84px 0 94px; border-top: 1px solid rgba(143, 197, 236, .12); }
 .section-intro h2 { margin: 0; font-size: clamp(33px, 3.6vw, 49px); line-height: 1.14; letter-spacing: -.055em; font-weight: 600; }
-.feature-grid, .download-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 43px; }
-.feature-card, .download-card { padding: 31px; border: 1px solid #334253; border-radius: 14px; background: linear-gradient(155deg, #202a36, #151c25); }
+.feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 43px; }
+.feature-card { padding: 31px; border: 1px solid #334253; border-radius: 14px; background: linear-gradient(155deg, #202a36, #151c25); }
 .feature-icon { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 29px; border: 1px solid #4a7190; border-radius: 10px; color: #8fc5ec; background: #304b60; font: 500 24px 'IBM Plex Sans', sans-serif; }
-.feature-card h3, .download-card h3 { margin-bottom: 12px; font-size: 20px; letter-spacing: -.035em; }
-.feature-card p, .download-card p { max-width: 310px; margin: 0; color: #9aaaba; font-size: 14px; line-height: 1.65; }
-.downloads-intro { display: flex; justify-content: space-between; align-items: end; gap: 30px; }
-.downloads-intro > p { max-width: 345px; margin: 0; color: #9aaaba; font-size: 14px; line-height: 1.6; }
-.download-card { min-height: 240px; display: flex; flex-direction: column; }
-.platform-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 24px; color: #8fc5ec; font: 500 30px 'IBM Plex Sans', sans-serif; }
-.download-card p { margin-bottom: 23px; }
-.asset-links { display: grid; gap: 7px; margin-top: auto; }
-.download-button, .unavailable { display: block; padding: 10px 13px; border-radius: 8px; font-size: 12px; font-weight: 700; text-align: center; }
-.download-button { color: #10151c; background: #8fc5ec; }
-.download-button:hover { background: #b6dcf4; }
-.unavailable { border: 1px solid #334253; color: #9aaaba; background: #202a36; }
-.source-link { margin: 22px 0 0; color: #9aaaba; font-size: 13px; }
-.source-link a { color: #8fc5ec; }
+.feature-card h3 { margin-bottom: 12px; font-size: 20px; letter-spacing: -.035em; }
+.feature-card p { max-width: 310px; margin: 0; color: #9aaaba; font-size: 14px; line-height: 1.65; }
 .connect-panel { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 42px 48px; margin: 0 0 87px; border: 1px solid #466985; border-radius: 16px; background: radial-gradient(ellipse at 90% 15%, rgba(79, 139, 196, .2), transparent 48%), #1c2c3c; }
 .connect-panel .eyebrow { margin-bottom: 10px; }
 .connect-panel h2 { margin-bottom: 10px; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.05em; }
@@ -138,13 +131,10 @@ h1 span { color: #8fc5ec; }
   .product-visual { height: 365px; margin-top: 33px; }
   .desktop-window { width: 560px; height: 345px; flex: none; transform: scale(.77); transform-origin: left center; }
   .phone-window { right: 4px; bottom: -4px; transform: scale(.8) rotate(7deg); transform-origin: right bottom; }
-  .features, .downloads { padding: 65px 0 70px; }
-  .feature-grid, .download-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 30px; }
-  .feature-card, .download-card { padding: 24px; }
+  .features { padding: 65px 0 70px; }
+  .feature-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 30px; }
+  .feature-card { padding: 24px; }
   .feature-icon { margin-bottom: 19px; }
-  .download-card { min-height: 210px; }
-  .downloads-intro { display: block; }
-  .downloads-intro > p { margin-top: 15px; }
   .connect-panel { display: block; padding: 27px; margin-bottom: 55px; }
   .connect-panel .button { margin-top: 24px; }
   .site-footer { flex-wrap: wrap; padding: 24px 0; }

@@ -1,6 +1,6 @@
 # Agentaps
 
-Your coding agents, wherever you work.
+Use your coding harness locally or over SSH using [ACP](https://agentclientprotocol.com/get-started/introduction), then securely connect from the web with Agentaps.
 
 Agentaps is a Rust and GPUI desktop client for agents that speak the Agent Client Protocol (ACP).
 
