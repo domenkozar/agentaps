@@ -5,6 +5,7 @@ use iroh::{
     endpoint::{Connection, SendStream, presets},
 };
 use secretspec::{NamedResolution, Secret, SecretBytes, Secrets, Spec};
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -13,7 +14,7 @@ use std::{
         mpsc::{self, Receiver},
     },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subtle::ConstantTimeEq;
 
@@ -22,6 +23,17 @@ pub struct Server {
     pub snapshot: Arc<Mutex<Response>>,
     pub status: Receiver<Result<String, String>>,
     pub pairing_token: Arc<Mutex<String>>,
+    clients: Arc<Mutex<Credentials>>,
+    provider: String,
+    revoke_tx: mpsc::Sender<Result<String, String>>,
+    pub revoke_results: Receiver<Result<String, String>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClientSummary {
+    pub id: String,
+    pub name: String,
+    pub paired_at: Option<u64>,
 }
 
 pub struct PendingCommand {
@@ -30,8 +42,70 @@ pub struct PendingCommand {
 }
 
 const CREDENTIAL_NAME: &str = "MOBILE_CREDENTIALS";
+pub const LEGACY_CLIENT_ID: &str = "legacy";
 const CONFIGURE_PROVIDER: &str =
     "Run `secretspec config global init` to save a default provider, or choose one for this run";
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct LinkedClient {
+    id: String,
+    name: String,
+    token: String,
+    paired_at: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+struct Credentials {
+    version: u8,
+    secret_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legacy_token: Option<String>,
+    #[serde(default)]
+    clients: Vec<LinkedClient>,
+}
+
+impl Credentials {
+    fn new() -> Self {
+        Self {
+            version: 1,
+            secret_key: random_token(),
+            legacy_token: None,
+            clients: Vec::new(),
+        }
+    }
+
+    fn secret_key(&self) -> SecretKey {
+        let bytes = hex::decode(&self.secret_key).unwrap();
+        SecretKey::from_bytes(bytes.as_slice().try_into().unwrap())
+    }
+
+    fn authorizes(&self, token: &str) -> bool {
+        self.legacy_token
+            .iter()
+            .chain(self.clients.iter().map(|client| &client.token))
+            .fold(false, |authorized, candidate| {
+                authorized | bool::from(token.as_bytes().ct_eq(candidate.as_bytes()))
+            })
+    }
+
+    fn linked_clients(&self) -> Vec<ClientSummary> {
+        let mut clients =
+            Vec::with_capacity(self.clients.len() + usize::from(self.legacy_token.is_some()));
+        if self.legacy_token.is_some() {
+            clients.push(ClientSummary {
+                id: LEGACY_CLIENT_ID.into(),
+                name: "Previously paired browsers".into(),
+                paired_at: None,
+            });
+        }
+        clients.extend(self.clients.iter().map(|client| ClientSummary {
+            id: client.id.clone(),
+            name: client.name.clone(),
+            paired_at: Some(client.paired_at),
+        }));
+        clients
+    }
+}
 
 fn missing_provider(path: &Path) -> String {
     format!(
@@ -44,13 +118,17 @@ fn random_token() -> String {
     hex::encode(SecretKey::generate().to_bytes())
 }
 
-fn consume_pairing_token(current: &Mutex<String>, attempt: &str) -> bool {
-    let mut current = current.lock().unwrap();
-    if !bool::from(attempt.as_bytes().ct_eq(current.as_bytes())) {
-        return false;
-    }
-    *current = random_token();
-    true
+fn client_name(name: Option<&str>) -> String {
+    name.map(|name| {
+        name.chars()
+            .filter(|character| !character.is_control())
+            .take(48)
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    })
+    .filter(|name| !name.is_empty())
+    .unwrap_or_else(|| "Browser".into())
 }
 
 fn global_config_path() -> Result<PathBuf, String> {
@@ -87,7 +165,7 @@ fn base_credential_store() -> Result<Secrets, String> {
     let spec = Spec::builder("agentaps")
         .secret(
             CREDENTIAL_NAME,
-            Secret::optional("Iroh identity and mobile access token"),
+            Secret::optional("Iroh identity and linked mobile clients"),
         )
         .build()
         .map_err(|error| error.to_string())?;
@@ -105,15 +183,12 @@ fn credential_store_with_provider(provider: &str) -> Result<Secrets, String> {
     Ok(store)
 }
 
+#[cfg(test)]
 fn credential_store_at(path: &Path) -> Result<Secrets, String> {
     let mut store = base_credential_store()?;
     let provider = configured_provider_at(path)?;
     store.set_provider(provider);
     Ok(store)
-}
-
-fn credential_store() -> Result<Secrets, String> {
-    credential_store_at(&global_config_path()?)
 }
 
 fn read_credentials(store: &Secrets) -> Result<Option<SecretBytes>, String> {
@@ -130,55 +205,146 @@ fn read_credentials(store: &Secrets) -> Result<Option<SecretBytes>, String> {
     }
 }
 
-fn decode_credentials(stored: SecretBytes) -> Result<SecretBytes, String> {
-    if stored.expose_secret().len() != 128 {
-        return Err("Invalid mobile credentials in SecretSpec provider".into());
-    }
-    let decoded = hex::decode(stored.expose_secret())
-        .map_err(|_| "Invalid mobile credentials in SecretSpec provider".to_string())?;
-    Ok(SecretBytes::from_vec(decoded))
+fn valid_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn save_credentials(store: &Secrets, bytes: &SecretBytes) -> Result<(), String> {
+fn decode_credentials(stored: SecretBytes) -> Result<Credentials, String> {
+    let bytes = stored.expose_secret();
+    let credentials = if bytes.len() == 128 && bytes.iter().all(u8::is_ascii_hexdigit) {
+        let value = std::str::from_utf8(bytes)
+            .map_err(|_| "Invalid mobile credentials in SecretSpec provider")?;
+        Credentials {
+            version: 1,
+            secret_key: value[..64].into(),
+            legacy_token: Some(value[64..].into()),
+            clients: Vec::new(),
+        }
+    } else {
+        serde_json::from_slice::<Credentials>(bytes)
+            .map_err(|_| "Invalid mobile credentials in SecretSpec provider")?
+    };
+    if credentials.version != 1
+        || !valid_token(&credentials.secret_key)
+        || credentials
+            .legacy_token
+            .as_deref()
+            .is_some_and(|token| !valid_token(token))
+        || credentials.clients.iter().any(|client| {
+            client.id.is_empty()
+                || client.id == LEGACY_CLIENT_ID
+                || client.name.is_empty()
+                || !valid_token(&client.token)
+        })
+    {
+        return Err("Invalid mobile credentials in SecretSpec provider".into());
+    }
+    Ok(credentials)
+}
+
+fn save_credentials(store: &Secrets, credentials: &Credentials) -> Result<(), String> {
+    let bytes = serde_json::to_vec(credentials).map_err(|error| error.to_string())?;
     store
-        .set(
-            CREDENTIAL_NAME,
-            SecretBytes::from_utf8(hex::encode(bytes.expose_secret())),
-        )
+        .set(CREDENTIAL_NAME, SecretBytes::from_vec(bytes))
         .map_err(|error| error.to_string())?;
     let saved = read_credentials(store)?.ok_or("Mobile credentials were not saved")?;
     let saved = decode_credentials(saved)?;
-    if saved.expose_secret() != bytes.expose_secret() {
+    if &saved != credentials {
         return Err("Mobile credentials did not match after saving".into());
     }
     Ok(())
 }
 
-fn credentials_with_store(store: &Secrets) -> Result<(SecretKey, String), String> {
-    let bytes = if let Some(stored) = read_credentials(store)? {
+fn credentials_with_store(store: &Secrets) -> Result<(SecretKey, Credentials), String> {
+    let credentials = if let Some(stored) = read_credentials(store)? {
         decode_credentials(stored)?
     } else {
-        let mut bytes = Vec::with_capacity(64);
-        bytes.extend_from_slice(&SecretKey::generate().to_bytes());
-        bytes.extend_from_slice(&SecretKey::generate().to_bytes());
-        let bytes = SecretBytes::from_vec(bytes);
-        save_credentials(store, &bytes)?;
-        bytes
+        let credentials = Credentials::new();
+        save_credentials(store, &credentials)?;
+        credentials
     };
-    let secret = SecretKey::from_bytes(bytes.expose_secret()[..32].try_into().unwrap());
-    let token = bytes.expose_secret()[32..]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    Ok((secret, token))
+    Ok((credentials.secret_key(), credentials))
 }
 
-fn credentials(provider: Option<&str>) -> Result<(SecretKey, String), String> {
-    let store = match provider {
-        Some(provider) => credential_store_with_provider(provider)?,
-        None => credential_store()?,
+fn credentials(provider: Option<&str>) -> Result<(SecretKey, Credentials, String), String> {
+    let provider = match provider {
+        Some(provider) => provider.to_owned(),
+        None => configured_provider_at(&global_config_path()?)?,
     };
-    credentials_with_store(&store)
+    let store = credential_store_with_provider(&provider)?;
+    let (secret, credentials) = credentials_with_store(&store)?;
+    Ok((secret, credentials, provider))
+}
+
+fn pair_client(
+    credentials: &Mutex<Credentials>,
+    pairing_token: &Mutex<String>,
+    provider: &str,
+    attempt: &str,
+    name: Option<&str>,
+) -> Result<String, String> {
+    let mut pairing_token = pairing_token.lock().unwrap();
+    if !bool::from(attempt.as_bytes().ct_eq(pairing_token.as_bytes())) {
+        return Err("Pairing link has expired. Copy a new one from desktop Agentaps.".into());
+    }
+    let mut current = credentials.lock().unwrap();
+    let mut updated = current.clone();
+    let id = loop {
+        let candidate = random_token()[..16].to_owned();
+        if !updated.clients.iter().any(|client| client.id == candidate) {
+            break candidate;
+        }
+    };
+    let token = random_token();
+    updated.clients.push(LinkedClient {
+        id,
+        name: client_name(name),
+        token: token.clone(),
+        paired_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    });
+    let store = credential_store_with_provider(provider)?;
+    save_credentials(&store, &updated)?;
+    *current = updated;
+    *pairing_token = random_token();
+    Ok(token)
+}
+
+fn revoke_client(credentials: &Mutex<Credentials>, provider: &str, id: &str) -> Result<(), String> {
+    let mut current = credentials.lock().unwrap();
+    let mut updated = current.clone();
+    let found = if id == LEGACY_CLIENT_ID {
+        updated.legacy_token.take().is_some()
+    } else {
+        let previous = updated.clients.len();
+        updated.clients.retain(|client| client.id != id);
+        previous != updated.clients.len()
+    };
+    if !found {
+        return Err("Linked client was already removed".into());
+    }
+    let store = credential_store_with_provider(provider)?;
+    save_credentials(&store, &updated)?;
+    *current = updated;
+    Ok(())
+}
+
+impl Server {
+    pub fn linked_clients(&self) -> Vec<ClientSummary> {
+        self.clients.lock().unwrap().linked_clients()
+    }
+
+    pub fn revoke_client(&self, id: String) {
+        let credentials = self.clients.clone();
+        let provider = self.provider.clone();
+        let sender = self.revoke_tx.clone();
+        thread::spawn(move || {
+            let result = revoke_client(&credentials, &provider, &id).map(|()| id);
+            let _ = sender.send(result);
+        });
+    }
 }
 
 async fn send_response(connection: Connection, mut send: SendStream, response: Response) {
@@ -203,15 +369,18 @@ pub fn start() -> Result<Server, String> {
 }
 
 pub fn start_with_provider(provider: Option<&str>) -> Result<Server, String> {
-    let (secret, token) = credentials(provider)?;
+    let (secret, credentials, provider) = credentials(provider)?;
     let (commands_tx, commands) = mpsc::channel();
     let (status_tx, status) = mpsc::channel();
+    let (revoke_tx, revoke_results) = mpsc::channel();
     let snapshot = Arc::new(Mutex::new(Response::Snapshot {
         projects: Vec::new(),
         agent_options: Vec::new(),
     }));
     let shared_snapshot = snapshot.clone();
-    let shared_token = token.clone();
+    let clients = Arc::new(Mutex::new(credentials));
+    let shared_clients = clients.clone();
+    let shared_provider = provider.clone();
     let pairing_token = Arc::new(Mutex::new(random_token()));
     let shared_pairing_token = pairing_token.clone();
     thread::spawn(move || {
@@ -233,7 +402,8 @@ pub fn start_with_provider(provider: Option<&str>) -> Result<Server, String> {
                     while let Some(incoming) = endpoint.accept().await {
                         let tx = commands_tx.clone();
                         let snapshot = shared_snapshot.clone();
-                        let token = shared_token.clone();
+                        let clients = shared_clients.clone();
+                        let provider = shared_provider.clone();
                         let pairing_token = shared_pairing_token.clone();
                         let paired_tx = ready_tx.clone();
                         let endpoint_id = endpoint_id.clone();
@@ -255,16 +425,33 @@ pub fn start_with_provider(provider: Option<&str>) -> Result<Server, String> {
                             let response = match recv.read_to_end(MAX_REQUEST_BYTES).await {
                                 Ok(bytes) => match serde_json::from_slice::<Request>(&bytes) {
                                     Ok(request) if matches!(request.command, Command::Pair) => {
-                                        if consume_pairing_token(&pairing_token, &request.token) {
-                                            eprintln!("Mobile pairing accepted");
-                                            let _ = paired_tx.send(Ok(endpoint_id));
-                                            Response::Paired { token }
-                                        } else {
-                                            eprintln!("Mobile pairing rejected: expired link");
-                                            Response::Error { message: "Pairing link has expired. Copy a new one from desktop Agentaps.".into() }
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            pair_client(
+                                                &clients,
+                                                &pairing_token,
+                                                &provider,
+                                                &request.token,
+                                                request.client_name.as_deref(),
+                                            )
+                                        })
+                                        .await;
+                                        match result {
+                                            Ok(Ok(token)) => {
+                                                eprintln!("Mobile pairing accepted");
+                                                let _ = paired_tx.send(Ok(endpoint_id));
+                                                Response::Paired { token }
+                                            }
+                                            Ok(Err(message)) => Response::Error { message },
+                                            Err(error) => Response::Error {
+                                                message: format!(
+                                                    "Could not save linked client: {error}"
+                                                ),
+                                            },
                                         }
                                     }
-                                    Ok(request) if bool::from(request.token.as_bytes().ct_eq(token.as_bytes())) => {
+                                    Ok(request)
+                                        if clients.lock().unwrap().authorizes(&request.token) =>
+                                    {
                                         match request.command {
                                             Command::Pair => unreachable!(),
                                             Command::Snapshot => snapshot.lock().unwrap().clone(),
@@ -311,6 +498,10 @@ pub fn start_with_provider(provider: Option<&str>) -> Result<Server, String> {
         snapshot,
         status,
         pairing_token,
+        clients,
+        provider,
+        revoke_tx,
+        revoke_results,
     })
 }
 
@@ -361,45 +552,105 @@ mod tests {
         .unwrap();
         let store = credential_store_at(&config_path).unwrap();
 
-        let (key, token) = credentials_with_store(&store).unwrap();
-        let (saved_key, saved_token) = credentials_with_store(&store).unwrap();
+        let (key, credentials) = credentials_with_store(&store).unwrap();
+        let (saved_key, saved_credentials) = credentials_with_store(&store).unwrap();
         assert_eq!(saved_key.to_bytes(), key.to_bytes());
-        assert_eq!(saved_token, token);
+        assert_eq!(saved_credentials, credentials);
         let stored = read_credentials(&store).unwrap().unwrap();
-        assert_eq!(stored.expose_secret().len(), 128);
-        assert!(stored.expose_secret().iter().all(u8::is_ascii_hexdigit));
+        assert_eq!(decode_credentials(stored).unwrap(), credentials);
+        assert!(credentials.clients.is_empty());
+        assert!(credentials.legacy_token.is_none());
     }
 
     #[test]
     fn ad_hoc_provider_creates_and_reuses_credentials() {
         let temp = tempfile::tempdir().unwrap();
         let provider = format!("file:{}", temp.path().display());
-        let (key, token) = credentials(Some(&provider)).unwrap();
-        let (saved_key, saved_token) = credentials(Some(&provider)).unwrap();
+        let (key, initial_credentials, _) = credentials(Some(&provider)).unwrap();
+        let (saved_key, saved_credentials, _) = credentials(Some(&provider)).unwrap();
         assert_eq!(saved_key.to_bytes(), key.to_bytes());
-        assert_eq!(saved_token, token);
+        assert_eq!(saved_credentials, initial_credentials);
     }
 
     #[test]
     fn deleting_configured_provider_entry_rotates_pairing_credentials() {
         let temp = tempfile::tempdir().unwrap();
         let store = file_store(temp.path());
-        let (old_key, old_token) = credentials_with_store(&store).unwrap();
+        let (old_key, _) = credentials_with_store(&store).unwrap();
         store.delete(CREDENTIAL_NAME).unwrap();
 
-        let (new_key, new_token) = credentials_with_store(&store).unwrap();
+        let (new_key, _) = credentials_with_store(&store).unwrap();
         assert_ne!(old_key.to_bytes(), new_key.to_bytes());
-        assert_ne!(old_token, new_token);
     }
 
     #[test]
-    fn pairing_token_can_be_used_only_once() {
+    fn linked_clients_have_individual_revocable_tokens() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = format!("file:{}", temp.path().display());
+        let store = file_store(temp.path());
+        let (_, credentials) = credentials_with_store(&store).unwrap();
+        let clients = Mutex::new(credentials);
         let initial = random_token();
-        let current = Mutex::new(initial.clone());
-        assert!(!consume_pairing_token(&current, "wrong"));
-        assert!(consume_pairing_token(&current, &initial));
-        assert!(!consume_pairing_token(&current, &initial));
-        assert_ne!(*current.lock().unwrap(), initial);
+        let pairing = Mutex::new(initial.clone());
+        assert!(pair_client(&clients, &pairing, &provider, "wrong", None).is_err());
+        assert_eq!(*pairing.lock().unwrap(), initial);
+
+        let first = pair_client(
+            &clients,
+            &pairing,
+            &provider,
+            &initial,
+            Some("Android browser"),
+        )
+        .unwrap();
+        assert!(pair_client(&clients, &pairing, &provider, &initial, None).is_err());
+        let second_pairing = pairing.lock().unwrap().clone();
+        let second = pair_client(&clients, &pairing, &provider, &second_pairing, None).unwrap();
+        let first_id = clients.lock().unwrap().clients[0].id.clone();
+        assert!(clients.lock().unwrap().authorizes(&first));
+        assert!(clients.lock().unwrap().authorizes(&second));
+        assert_eq!(
+            clients.lock().unwrap().linked_clients()[0].name,
+            "Android browser"
+        );
+
+        revoke_client(&clients, &provider, &first_id).unwrap();
+        assert!(!clients.lock().unwrap().authorizes(&first));
+        assert!(clients.lock().unwrap().authorizes(&second));
+        let (_, saved) = credentials_with_store(&store).unwrap();
+        assert_eq!(saved, *clients.lock().unwrap());
+    }
+
+    #[test]
+    fn older_shared_token_is_shown_and_can_be_revoked_as_a_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let provider = format!("file:{}", temp.path().display());
+        let store = file_store(temp.path());
+        let legacy_token = random_token();
+        store
+            .set(
+                CREDENTIAL_NAME,
+                SecretBytes::from_utf8(format!("{}{}", random_token(), legacy_token)),
+            )
+            .unwrap();
+        let (_, credentials) = credentials_with_store(&store).unwrap();
+        assert!(credentials.authorizes(&legacy_token));
+        assert_eq!(credentials.linked_clients()[0].id, LEGACY_CLIENT_ID);
+        let clients = Mutex::new(credentials);
+        let pairing_token = random_token();
+        let new_token = pair_client(
+            &clients,
+            &Mutex::new(pairing_token.clone()),
+            &provider,
+            &pairing_token,
+            None,
+        )
+        .unwrap();
+        revoke_client(&clients, &provider, LEGACY_CLIENT_ID).unwrap();
+        assert!(!clients.lock().unwrap().authorizes(&legacy_token));
+        assert!(clients.lock().unwrap().authorizes(&new_token));
+        let (_, saved) = credentials_with_store(&store).unwrap();
+        assert!(saved.legacy_token.is_none());
     }
 
     #[test]

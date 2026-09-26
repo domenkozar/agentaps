@@ -11,6 +11,7 @@ Notable changes to Agentaps are recorded here.
 
 ### Added
 
+- Desktop mobile pairing lists linked browsers and lets you revoke each new pairing individually; older shared-token pairings can be revoked together.
 - Agent replies offer a fork icon at the top right of each reply that starts a separate session from that point and carries the active conversation into its first prompt.
 - Agent replies offer a copy button below the fork icon that matches its size and briefly shows a checkmark after copying the reply text.
 - Starting a message with `!` asks the agent to run the exact shell command and shows `shell` inside the composer.

@@ -26,6 +26,14 @@ const decoder = new TextDecoder();
 let pendingPasskey = null;
 let qrCamera = null;
 
+export function browserClientName() {
+  const agent = navigator.userAgent;
+  if (/iPad/i.test(agent)) return 'iPad browser';
+  if (/iPhone|iPod/i.test(agent)) return 'iPhone browser';
+  if (/Android/i.test(agent)) return 'Android browser';
+  return 'Desktop browser';
+}
+
 function stopCamera(session) {
   session.cancelled = true;
   session.stream?.getTracks().forEach(track => track.stop());
@@ -325,6 +333,7 @@ extern "C" {
     fn promptAcpCommand() -> JsValue;
     fn canUsePhoneUnlock() -> bool;
     fn clearPairingHash();
+    fn browserClientName() -> String;
     fn pageHidden() -> bool;
     fn stopQrCamera();
     #[wasm_bindgen(catch)]
@@ -1633,6 +1642,7 @@ async fn request(
         .map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec(&Request {
         token: token.into(),
+        client_name: matches!(&command, Command::Pair).then(browserClientName),
         command,
     })
     .map_err(|error| error.to_string())?;

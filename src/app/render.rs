@@ -1,5 +1,6 @@
 use super::*;
 use gpui::Div;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod conversation;
 mod diff;
@@ -39,7 +40,109 @@ fn status_badge(agent: &AgentView) -> impl IntoElement {
         .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
 }
 
+fn paired_ago(paired_at: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let elapsed = now.saturating_sub(paired_at);
+    if elapsed < 60 {
+        "Paired just now".into()
+    } else if elapsed < 3_600 {
+        format!("Paired {} minutes ago", elapsed / 60)
+    } else if elapsed < 86_400 {
+        format!("Paired {} hours ago", elapsed / 3_600)
+    } else {
+        format!("Paired {} days ago", elapsed / 86_400)
+    }
+}
+
 impl Workspace {
+    fn render_linked_clients(&self, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        let clients = self
+            .mobile
+            .as_ref()
+            .map(crate::mobile::Server::linked_clients)
+            .unwrap_or_default();
+        let mut list = div()
+            .id("linked-mobile-clients")
+            .w_full()
+            .min_w(px(0.))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_lg().child("Linked clients"));
+        if clients.is_empty() {
+            list = list.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(MUTED))
+                    .child("No browsers linked yet."),
+            );
+        }
+        for client in clients {
+            let id = client.id;
+            let legacy = id == crate::mobile::LEGACY_CLIENT_ID;
+            let confirming = self.mobile_revoke_confirm.as_deref() == Some(&id);
+            let description = client.paired_at.map_or_else(
+                || "Revoking this entry disconnects all older pairings.".into(),
+                paired_ago,
+            );
+            let revoke_id = id.clone();
+            let mut row = div()
+                .id(format!("linked-mobile-{id}"))
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_sm().child(client.name))
+                .child(div().text_xs().text_color(rgb(MUTED)).child(description))
+                .child(
+                    div().flex().gap_2().child(
+                        div()
+                            .id(format!("revoke-mobile-{id}"))
+                            .cursor_pointer()
+                            .rounded_md()
+                            .px_3()
+                            .py_1()
+                            .bg(rgb(if confirming { ERROR_SURFACE } else { SURFACE }))
+                            .text_xs()
+                            .text_color(rgb(if confirming { ERROR_TEXT } else { TEXT }))
+                            .child(if confirming {
+                                "Confirm revoke"
+                            } else {
+                                "Revoke"
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.revoke_mobile_client(revoke_id.clone(), cx)
+                            })),
+                    ),
+                );
+            if confirming {
+                row = row.child(
+                    div()
+                        .id(format!("cancel-revoke-mobile-{id}"))
+                        .cursor_pointer()
+                        .text_xs()
+                        .text_color(rgb(MUTED))
+                        .child("Cancel")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.mobile_revoke_confirm = None;
+                            cx.notify();
+                        })),
+                );
+            }
+            if legacy {
+                row = row.border_color(rgb(ACCENT));
+            }
+            list = list.child(row);
+        }
+        list
+    }
+
     fn render_mobile_provider(&self, error: &str, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
         div()
             .id("mobile-provider-overlay")
@@ -152,9 +255,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<Div> {
         let viewport = window.viewport_size();
-        let available = (f32::from(viewport.width) - 64.)
-            .min(f32::from(viewport.height) - 210.)
-            .min(720.)
+        let side_by_side = f32::from(viewport.width) >= 760.;
+        let available = (f32::from(viewport.width) - if side_by_side { 340. } else { 64. })
+            .min(f32::from(viewport.height) - 230.)
+            .min(640.)
             .max(80.);
         let mut qr = div().flex().flex_col().flex_shrink_0().bg(rgb(0xffffff));
         if let Some(rows) = &self.mobile_qr {
@@ -177,6 +281,44 @@ impl Workspace {
             .mobile_link()
             .and_then(|link| link.split_once('#').map(|(site, _)| site.to_owned()))
             .unwrap_or_default();
+        let controls = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .id("copy-mobile-link")
+                    .cursor_pointer()
+                    .rounded_md()
+                    .px_4()
+                    .py_2()
+                    .bg(rgb(ACCENT_SURFACE))
+                    .child("Copy link")
+                    .on_click(cx.listener(|this, _, _, cx| this.copy_mobile_link(cx))),
+            )
+            .child(
+                div()
+                    .id("close-mobile-pairing")
+                    .cursor_pointer()
+                    .rounded_md()
+                    .px_4()
+                    .py_2()
+                    .bg(rgb(SURFACE))
+                    .child("Close")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.mobile_pairing_visible = false;
+                        this.mobile_revoke_confirm = None;
+                        cx.notify();
+                    })),
+            );
+        let qr_column = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .child(qr)
+            .child(controls);
+        let clients = self.render_linked_clients(cx);
         div()
             .id("mobile-pairing-overlay")
             .absolute()
@@ -199,37 +341,17 @@ impl Workspace {
                     .text_center()
                     .child(format!("Open {site} on your phone and scan this code.")),
             )
-            .child(qr)
             .child(
                 div()
+                    .w_full()
+                    .max_w(px(960.))
                     .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        div()
-                            .id("copy-mobile-link")
-                            .cursor_pointer()
-                            .rounded_md()
-                            .px_4()
-                            .py_2()
-                            .bg(rgb(ACCENT_SURFACE))
-                            .child("Copy link")
-                            .on_click(cx.listener(|this, _, _, cx| this.copy_mobile_link(cx))),
-                    )
-                    .child(
-                        div()
-                            .id("close-mobile-pairing")
-                            .cursor_pointer()
-                            .rounded_md()
-                            .px_4()
-                            .py_2()
-                            .bg(rgb(SURFACE))
-                            .child("Close")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.mobile_pairing_visible = false;
-                                cx.notify();
-                            })),
-                    ),
+                    .items_start()
+                    .gap_5()
+                    .when(side_by_side, |body| body.flex_row())
+                    .when(!side_by_side, |body| body.flex_col().items_center())
+                    .child(qr_column)
+                    .child(div().w_full().max_w(px(280.)).child(clients)),
             )
             .when_some(self.notice.as_ref(), |overlay, notice| {
                 overlay.child(div().text_color(rgb(MUTED)).child(notice.clone()))

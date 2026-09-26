@@ -104,11 +104,26 @@ impl Workspace {
         }
     }
 
+    pub(super) fn revoke_mobile_client(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.mobile_revoke_confirm.as_deref() != Some(&id) {
+            self.mobile_revoke_confirm = Some(id);
+            cx.notify();
+            return;
+        }
+        self.mobile_revoke_confirm = None;
+        if let Some(server) = &self.mobile {
+            server.revoke_client(id);
+            self.notice = Some("Revoking linked client…".into());
+        }
+        cx.notify();
+    }
+
     pub(super) fn poll_mobile(&mut self, cx: &mut Context<Self>) {
         let Some(server) = &self.mobile else {
             return;
         };
         let statuses: Vec<_> = server.status.try_iter().collect();
+        let revocations: Vec<_> = server.revoke_results.try_iter().collect();
         let commands: Vec<_> = server.commands.try_iter().collect();
         let handled_command = !commands.is_empty();
         let received_status = !statuses.is_empty();
@@ -118,11 +133,17 @@ impl Workspace {
                     let already_ready = self.mobile_endpoint_id.is_some();
                     self.mobile_endpoint_id = Some(endpoint_id);
                     if already_ready {
-                        self.mobile_pairing_visible = false;
-                        self.notice = Some(
-                            "Phone paired. Select the phone icon to show a fresh pairing code."
-                                .into(),
-                        );
+                        self.mobile_qr = self.mobile_link().and_then(|link| {
+                            QrCode::new(link.as_bytes()).ok().map(|qr| {
+                                qr.to_colors()
+                                    .chunks(qr.width())
+                                    .map(|row| {
+                                        row.iter().map(|color| *color == Color::Dark).collect()
+                                    })
+                                    .collect()
+                            })
+                        });
+                        self.notice = Some("Browser linked. A fresh pairing code is ready.".into());
                     } else if let Some(link) = self.mobile_link() {
                         self.mobile_qr = QrCode::new(link.as_bytes()).ok().map(|qr| {
                             qr.to_colors()
@@ -137,6 +158,13 @@ impl Workspace {
                 }
                 Err(error) => self.notice = Some(format!("Mobile access failed: {error}")),
             }
+            cx.notify();
+        }
+        for result in revocations {
+            self.notice = Some(match result {
+                Ok(_) => "Linked client revoked.".into(),
+                Err(error) => format!("Could not revoke linked client: {error}"),
+            });
             cx.notify();
         }
         for pending in commands {

@@ -8,6 +8,8 @@ pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub struct Request {
     pub token: String,
     pub command: Command,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
