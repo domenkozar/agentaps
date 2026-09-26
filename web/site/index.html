@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10151c">
+    <meta name="description" content="Agentaps keeps your coding agents close, on your desktop, over SSH, and in your phone browser.">
+    <title>Agentaps | Your coding agents, wherever you work</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script>
+      if (/^#[^:]+:[0-9a-f]{64}$/i.test(location.hash)) {
+        location.replace(`/connect/${location.hash}`);
+      }
+    </script>
+    <script src="/site.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="Agentaps home">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>agentaps<span class="brand-dot">.</span></span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a href="#why-agentaps">Why Agentaps</a>
+          <a href="#downloads">Downloads</a>
+          <a class="nav-connect" href="/connect/">Web Connect <span aria-hidden="true">↗</span></a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-line"></span> ONE PLACE FOR YOUR CODING AGENTS</p>
+            <h1 id="hero-title">Your agents.<br><span>Everywhere</span><br><span>you work.</span></h1>
+            <p class="hero-description">Keep your conversations on your desktop, run agents on remote servers, and pick up where you left off from your phone browser.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="/connect/">Open Web Connect <span aria-hidden="true">↗</span></a>
+              <a class="button button-secondary" href="#downloads">Get the desktop app <span aria-hidden="true">↓</span></a>
+            </div>
+            <p class="hero-note">Open source · Agent Client Protocol · No mobile app required</p>
+          </div>
+
+          <div class="product-visual" aria-hidden="true">
+            <div class="visual-glow"></div>
+            <div class="desktop-window">
+              <div class="window-topbar">
+                <span class="window-dots"><i></i><i></i><i></i></span>
+                <span>agentaps</span>
+                <span class="window-topbar-end">⌘</span>
+              </div>
+              <div class="window-body">
+                <div class="window-sidebar">
+                  <div class="sidebar-search"></div>
+                  <div class="sidebar-label">PROJECTS</div>
+                  <div class="sidebar-item selected"><span class="status-dot amber"></span> agentaps</div>
+                  <div class="sidebar-item"><span class="status-dot blue"></span> docs</div>
+                  <div class="sidebar-item"><span class="status-dot green"></span> api</div>
+                  <div class="sidebar-bottom"><span>↟</span> New session</div>
+                </div>
+                <div class="window-chat">
+                  <div class="chat-toolbar"><span class="status-dot green"></span><span>Codex</span><span class="toolbar-project">agentaps / main</span></div>
+                  <div class="chat-content">
+                    <div class="chat-bubble user">Make the mobile layout easier to use.</div>
+                    <div class="chat-bubble agent"><span class="agent-label">AGENT</span><span class="code-line long"></span><span class="code-line mid"></span><span class="code-line short"></span></div>
+                    <div class="chat-activity"><span class="activity-dot"></span> Working in your project</div>
+                  </div>
+                  <div class="chat-composer">Ask your agent… <span>↵</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="phone-window">
+              <div class="phone-notch"></div>
+              <div class="phone-brand">agentaps<span>.</span></div>
+              <div class="phone-title">Your sessions</div>
+              <div class="phone-session"><span class="status-dot green"></span><div><strong>agentaps</strong><small>Codex · active</small></div><span>›</span></div>
+              <div class="phone-session"><span class="status-dot blue"></span><div><strong>api</strong><small>Claude · ready</small></div><span>›</span></div>
+              <div class="phone-bottom">Connected through Iroh <span class="status-dot green"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="features" id="why-agentaps" aria-labelledby="features-title">
+          <div class="section-intro">
+            <p class="eyebrow">BUILT FOR HOW YOU WORK</p>
+            <h2 id="features-title">One workspace, any machine.</h2>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card"><span class="feature-icon">⌘</span><h3>Agents in one place</h3><p>Keep projects, conversations, and agent sessions together in a focused desktop workspace.</p></article>
+            <article class="feature-card"><span class="feature-icon">↗</span><h3>Work over SSH</h3><p>Start agents on a server through your existing SSH setup and follow the conversation locally.</p></article>
+            <article class="feature-card"><span class="feature-icon">◌</span><h3>Continue on your phone</h3><p>Pair your browser with a QR code, unlock your saved connection, and control sessions without installing an app.</p></article>
+          </div>
+        </section>
+
+        <section class="downloads" id="downloads" aria-labelledby="downloads-title">
+          <div class="section-intro downloads-intro">
+            <div><p class="eyebrow">DESKTOP APP</p><h2 id="downloads-title">Get Agentaps.</h2></div>
+            <p>Choose your platform. Published builds appear here as soon as they are available.</p>
+          </div>
+          <div class="download-grid" id="download-grid">
+            <article class="download-card" data-platform="linux"><div class="platform-icon" aria-hidden="true">◧</div><h3>Linux</h3><p>Run your agents on your desktop.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
+            <article class="download-card" data-platform="macos"><div class="platform-icon" aria-hidden="true">⌘</div><h3>macOS</h3><p>Stay with your projects across devices.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
+            <article class="download-card" data-platform="windows"><div class="platform-icon" aria-hidden="true">⊞</div><h3>Windows</h3><p>Bring your coding agents together.</p><div class="asset-links"><span class="unavailable">Build coming soon</span></div></article>
+          </div>
+          <p class="source-link">Prefer to build it yourself? <a href="https://github.com/domenkozar/agentaps#run">See source installation instructions <span aria-hidden="true">↗</span></a></p>
+        </section>
+
+        <section class="connect-panel" aria-labelledby="connect-title">
+          <div><p class="eyebrow">NO APP ON YOUR PHONE</p><h2 id="connect-title">Your desktop is a scan away.</h2><p>Open Agentaps on your computer, select the phone icon, and scan its QR code with Web Connect.</p></div>
+          <a class="button button-primary" href="/connect/">Open Web Connect <span aria-hidden="true">↗</span></a>
+        </section>
+      </main>
+
+      <footer class="site-footer"><span>agentaps<span class="brand-dot">.</span></span><div><a href="https://github.com/domenkozar/agentaps">GitHub</a><a href="/connect/">Web Connect</a></div><span>Open source under Apache-2.0</span></footer>
+    </div>
+  </body>
+</html>

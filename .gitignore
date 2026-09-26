@@ -1,6 +1,7 @@
 /target
 /web/target
 /web/dist
+/.wrangler
 /vendor/gpui_ce_web/.cargo-ok
 /vendor/gpui_ce_web/.cargo_vcs_info.json
 /vendor/gpui_ce_web/Cargo.lock
