@@ -665,7 +665,6 @@ impl Workspace {
                 .find(|(id, session)| *id != self.pane_id && *session == Some(agent_id))
             {
                 self.activate_pane(id, cx);
-                return;
             }
         }
         self.set_pane_view(view, window, cx);
@@ -701,26 +700,28 @@ impl Workspace {
         }
         if self.view.displayed_session() != view.displayed_session() {
             self.conversation.prompt_recall = None;
-            // The shared diff remains open and follows the focused session.
-            self.diff.selected_file = None;
-            self.diff.error = None;
-            self.diff.rows = Arc::new(Vec::new());
-            self.diff.list = ListState::new(0, ListAlignment::Top, px(28.));
         }
         let project_index = view
             .displayed_session()
             .map(|session| session.project_index);
-        if self
-            .view
-            .displayed_session()
-            .map(|session| session.project_index)
-            != project_index
+        // Diff data belongs to the checkout, so another session in the same
+        // project can retain it. Inactive pane changes must leave it alone.
+        if self.pane_id == self.pane_layout.focused
+            && self
+                .view
+                .displayed_session()
+                .map(|session| session.project_index)
+                != project_index
         {
             self.diff.request_id += 1;
             self.diff.loading = false;
             self.diff.counts = None;
             self.diff.files.clear();
             self.diff.file_stats.clear();
+            self.diff.selected_file = None;
+            self.diff.error = None;
+            self.diff.rows = Arc::new(Vec::new());
+            self.diff.list = ListState::new(0, ListAlignment::Top, px(28.));
         }
         if self.conversation.file_search_project != project_index {
             self.conversation.file_search_project = project_index;

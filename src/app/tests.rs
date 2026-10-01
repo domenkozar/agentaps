@@ -1080,6 +1080,61 @@ fn verify_split_panes(
                 this.conversation.composer.read(cx).value().as_ref(),
                 "first pane draft"
             );
+            let first = SessionLocation {
+                project_index: 0,
+                agent_index: 0,
+            };
+            let second = SessionLocation {
+                project_index: 0,
+                agent_index: 1,
+            };
+            // Sessions in the same checkout share the loaded diff, including
+            // its rows and selected file, without needing a filesystem event.
+            this.diff.visible = true;
+            this.diff.loading = false;
+            this.diff.files = vec![DiffFile {
+                path: "changed.txt".into(),
+                hunks: Vec::new(),
+                note: None,
+            }];
+            this.diff.file_stats = vec![(1, 0)];
+            this.diff.selected_file = Some("changed.txt".into());
+            this.diff.rows = Arc::new(diff_list_rows(
+                &this.diff.files,
+                &this.diff.file_stats,
+                this.diff.selected_file.as_deref(),
+                this.diff.presentation,
+            ));
+            this.diff.list.reset(this.diff.rows.len());
+            let rows = this.diff.rows.clone();
+            let request = this.diff.request_id;
+            this.set_view(WorkspaceView::Conversation(second), window, cx);
+            assert!(this.diff.visible);
+            assert!(Arc::ptr_eq(&this.diff.rows, &rows));
+            assert_eq!(this.diff.request_id, request);
+            assert_eq!(this.diff.selected_file.as_deref(), Some("changed.txt"));
+            this.set_view(WorkspaceView::Conversation(first), window, cx);
+
+            // A picker reserves its previous session. Selecting that session
+            // from another pane must reveal it in its original pane.
+            this.open_picker(PickerStep::Folders, window, cx);
+            this.split_pane(Direction::Right, window, cx);
+            let other_pane = this.pane_id;
+            this.set_view(WorkspaceView::Conversation(second), window, cx);
+            this.set_view(WorkspaceView::Conversation(first), window, cx);
+            assert_eq!(this.pane_id, 1);
+            assert_eq!(this.view.displayed_session(), Some(first));
+            assert_eq!(
+                this.saved_pane_layout().root.panes(),
+                [(1, Some(701)), (other_pane, Some(702))]
+            );
+            assert_eq!(
+                this.conversation.composer.read(cx).value().as_ref(),
+                "first pane draft"
+            );
+            this.activate_pane(other_pane, cx);
+            this.close_pane(window, cx);
+
             // Archived sessions disappear from their pane without affecting
             // another session or an agent process.
             this.projects[0].agents[0].config.archived = true;

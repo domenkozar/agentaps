@@ -17,6 +17,8 @@ Notable changes to Agentaps are recorded here.
 
 ### Fixed
 
+- Keep the shared diff populated when switching sessions in the same project, and reveal a session when its pane is showing the new-session picker.
+
 - The default Agentaps theme now follows the desktop light/dark scheme with matching light and dark palettes across the conversation, sidebar, controls, and diffs.
 
 - Conversation history comes from harness session replay instead of a duplicate local transcript. Config saves contain only session references and app state, skip unchanged data, and retain prior session references in the archive after context resets or folder moves. An opt-in smoke test verifies history replay after restarting an authenticated harness.
