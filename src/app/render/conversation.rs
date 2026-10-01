@@ -7,7 +7,7 @@ use gpui_kit::component::attachment::{
 use gpui_kit::component::progress::Progress;
 
 impl Workspace {
-    pub(super) fn render_conversation(
+    pub(in crate::app) fn render_conversation(
         &self,
         mut chat: Div,
         project_index: usize,
@@ -18,10 +18,15 @@ impl Workspace {
         let palette = theme::palette(cx);
         let project = &self.projects[project_index];
         let agent = &project.agents[agent_index];
-        let (added, removed) = self.diff.counts.unwrap_or_default();
+        let diff_counts = (self.pane_id == self.pane_layout.focused)
+            .then_some(self.diff.counts)
+            .flatten();
+        let (added, removed) = diff_counts.unwrap_or_default();
         let available_agents = self.picker.available_agents.clone();
         let current_command = agent.config.command.clone();
         let current_name = agent.name.clone();
+        let pane_id = self.pane_id;
+        let agent_id = agent.config.id;
         let view = cx.entity().clone();
         let agent_selector = div().flex().flex_shrink_0().items_center().child(
             Button::new(format!("agent-select-{}", agent.config.id))
@@ -62,6 +67,9 @@ impl Workspace {
                                 .disabled(current)
                                 .on_click(move |_, window, cx| {
                                     view.update(cx, |this, cx| {
+                                        if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                            return;
+                                        }
                                         this.start_agent_for_project(
                                             project_index,
                                             command.clone(),
@@ -79,6 +87,9 @@ impl Workspace {
                             PopupMenuItem::new("Choose agent or custom command…").on_click(
                                 move |_, window, cx| {
                                     view.update(cx, |this, cx| {
+                                        if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                            return;
+                                        }
                                         this.open_picker(
                                             PickerStep::Agents { project_index },
                                             window,
@@ -146,57 +157,81 @@ impl Workspace {
                                 .to_owned(),
                         )
                         .tooltip(|window, cx| Tooltip::new("Rename session").build(window, cx))
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                             this.open_rename_session(agent_id, window, cx);
                         }))
                 }
             });
+        let pane_id = self.pane_id;
         let agent_id = agent.config.id;
         let menu_view = cx.entity().clone();
         let session_menu = Button::new(format!("session-menu-{}", agent.config.id))
             .ghost()
             .compact()
             .icon(IconName::Ellipsis)
-            .tooltip("Session")
-            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            .tooltip("Session and pane")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, cx| {
                 let rename_view = menu_view.clone();
                 let reset_view = menu_view.clone();
                 let agent_view = menu_view.clone();
                 let archive_view = menu_view.clone();
-                menu.item(
-                    PopupMenuItem::new("Rename session…").on_click(move |_, window, cx| {
-                        rename_view.update(cx, |this, cx| {
-                            this.open_rename_session(agent_id, window, cx);
-                        });
-                    }),
-                )
-                .item(
-                    PopupMenuItem::new("Reset context")
-                        .disabled(!can_reset)
-                        .on_click(move |_, _, cx| {
-                            reset_view.update(cx, |this, cx| {
-                                this.reset_context(project_index, agent_index, cx);
+                let menu = menu
+                    .item(
+                        PopupMenuItem::new("Rename session…").on_click(move |_, window, cx| {
+                            rename_view.update(cx, |this, cx| {
+                                if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                    return;
+                                }
+                                this.open_rename_session(agent_id, window, cx);
                             });
                         }),
-                )
-                .item(
-                    PopupMenuItem::new("New session with another agent…").on_click(
-                        move |_, window, cx| {
-                            agent_view.update(cx, |this, cx| {
-                                this.open_picker(PickerStep::Agents { project_index }, window, cx);
+                    )
+                    .item(
+                        PopupMenuItem::new("Reset context")
+                            .disabled(!can_reset)
+                            .on_click(move |_, _, cx| {
+                                reset_view.update(cx, |this, cx| {
+                                    if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                        return;
+                                    }
+                                    this.reset_context(project_index, agent_index, cx);
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("New session with another agent…").on_click(
+                            move |_, window, cx| {
+                                agent_view.update(cx, |this, cx| {
+                                    if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                        return;
+                                    }
+                                    this.open_picker(
+                                        PickerStep::Agents { project_index },
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            },
+                        ),
+                    )
+                    .item(PopupMenuItem::separator())
+                    .item(
+                        PopupMenuItem::new("Archive session").on_click(move |_, window, cx| {
+                            archive_view.update(cx, |this, cx| {
+                                if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                    return;
+                                }
+                                this.set_archived(project_index, agent_index, true, window, cx);
                             });
-                        },
-                    ),
+                        }),
+                    )
+                    .min_w(px(220.));
+                Self::pane_menu_items(
+                    menu.item(PopupMenuItem::separator()),
+                    pane_id,
+                    &menu_view,
+                    cx,
                 )
-                .item(PopupMenuItem::separator())
-                .item(
-                    PopupMenuItem::new("Archive session").on_click(move |_, window, cx| {
-                        archive_view.update(cx, |this, cx| {
-                            this.set_archived(project_index, agent_index, true, window, cx);
-                        });
-                    }),
-                )
-                .min_w(px(220.))
             });
         let project_controls = div()
             .flex()
@@ -218,7 +253,7 @@ impl Workspace {
                     .tooltip(move |window, cx| {
                         Tooltip::new(format!("Change folder: {location}")).build(window, cx)
                     })
-                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                         this.open_change_folder(
                             SessionLocation {
                                 project_index,
@@ -252,7 +287,7 @@ impl Workspace {
                             } else {
                                 "Diff"
                             })
-                            .when(self.diff.counts.is_some(), |element| {
+                            .when(diff_counts.is_some(), |element| {
                                 element
                                     .child(
                                         div()
@@ -266,7 +301,7 @@ impl Workspace {
                                     )
                             }),
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(self.pane_listener(cx, move |this, _, _, cx| {
                         if this.diff.visible {
                             this.close_diff();
                             cx.notify();
@@ -288,22 +323,35 @@ impl Workspace {
                 .child(agent_controls)
                 .child(project_controls),
         );
+        let pane_id = self.pane_id;
+        let agent_id = agent.config.id;
         let view = cx.entity().clone();
         let rows = self.conversation.chat_rows.clone();
         let history = gpui_kit::list(
             self.conversation.chat_list.clone(),
             move |index, window, cx| {
                 view.update(cx, |this, cx| {
-                    let agent = &this.projects[project_index].agents[agent_index];
-                    this.render_chat_row(
-                        agent,
-                        project_index,
-                        agent_index,
-                        rows[index].kind,
-                        window,
-                        cx,
-                    )
-                    .into_any_element()
+                    this.with_pane(pane_id, cx, |this, cx| {
+                        let Some(session) = this.session_location(agent_id) else {
+                            return div().into_any_element();
+                        };
+                        if this.view.displayed_session() != Some(session) {
+                            return div().into_any_element();
+                        }
+                        let project_index = session.project_index;
+                        let agent_index = session.agent_index;
+                        let agent = &this.projects[project_index].agents[agent_index];
+                        this.render_chat_row(
+                            agent,
+                            project_index,
+                            agent_index,
+                            rows[index].kind,
+                            window,
+                            cx,
+                        )
+                        .into_any_element()
+                    })
+                    .unwrap_or_else(|| div().into_any_element())
                 })
             },
         )
@@ -379,7 +427,7 @@ impl Workspace {
                             .text_color(palette.color(ACCENT)),
                         )
                         .child(div().min_w(px(0.)).truncate().text_sm().child(name))
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                             this.complete_file(&file, window, cx);
                         })),
                 );
@@ -441,7 +489,7 @@ impl Workspace {
                                     .child(hint),
                             )
                         })
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                             this.complete_slash_command(command.clone(), window, cx);
                         })),
                 );
@@ -451,13 +499,11 @@ impl Workspace {
         let shell_mode = self.conversation.composer.read(cx).value().starts_with('!');
         let agent_id = agent.config.id;
         let draft_images = self
-            .conversation
             .draft_images
             .get(&agent_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
         let draft_files = self
-            .conversation
             .draft_files
             .get(&agent_id)
             .map(Vec::as_slice)
@@ -504,7 +550,7 @@ impl Workspace {
                     button
                         .cursor_pointer()
                         .hover(|style| style.bg(palette.color(HOVER)))
-                        .on_click(cx.listener(|this, _, _, cx| this.cancel_prompt(cx)))
+                        .on_click(self.pane_listener(cx, |this, _, _, cx| this.cancel_prompt(cx)))
                 })
         } else {
             div()
@@ -525,7 +571,11 @@ impl Workspace {
                     button
                         .cursor_pointer()
                         .hover(|style| style.bg(palette.color(SELECTED)))
-                        .on_click(cx.listener(|this, _, window, cx| this.send_prompt(window, cx)))
+                        .on_click(
+                            self.pane_listener(cx, |this, _, window, cx| {
+                                this.send_prompt(window, cx)
+                            }),
+                        )
                 })
         };
         let workspace = cx.entity().downgrade();
@@ -536,7 +586,7 @@ impl Workspace {
                         .id(("composer-image", index))
                         .axis(gpui_kit::Axis::Vertical)
                         .media(AttachmentMedia::new().src(self.images.path(image)))
-                        .on_remove(cx.listener(move |this, _, _, cx| {
+                        .on_remove(self.pane_listener(cx, move |this, _, _, cx| {
                             this.remove_draft_image(agent_id, index, cx);
                         }))
                 }))
@@ -548,7 +598,7 @@ impl Workspace {
                         .content(
                             AttachmentContent::new().title(AttachmentTitle::new(file.name.clone())),
                         )
-                        .on_remove(cx.listener(move |this, _, _, cx| {
+                        .on_remove(self.pane_listener(cx, move |this, _, _, cx| {
                             this.remove_draft_file(agent_id, index, cx);
                         }))
                 }))
@@ -574,9 +624,11 @@ impl Workspace {
             .drag_over::<ExternalPaths>(move |style, _, _, _| {
                 style.border_color(palette.color(ACCENT))
             })
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                this.drop_paths(paths, cx);
-            }))
+            .on_drop(
+                self.pane_listener(cx, |this, paths: &ExternalPaths, _, cx| {
+                    this.drop_paths(paths, cx);
+                }),
+            )
             .children(attachments.map(|attachments| div().px_2().pt_2().child(attachments)))
             .child(
                 div()
@@ -598,7 +650,14 @@ impl Workspace {
                                     .when(shell_mode, |textarea| textarea.pr(px(48.)))
                                     .on_paste(move |item, _, cx| {
                                         workspace
-                                            .update(cx, |this, cx| this.paste_images(item, cx))
+                                            .update(cx, |this, cx| {
+                                                if !this
+                                                    .activate_session_pane(pane_id, agent_id, cx)
+                                                {
+                                                    return false;
+                                                }
+                                                this.paste_images(item, cx)
+                                            })
                                             .unwrap_or(false)
                                     }),
                             )
@@ -674,6 +733,8 @@ impl Workspace {
         } else {
             "Add file…"
         };
+        let pane_id = self.pane_id;
+        let agent_id = agent.config.id;
         let view = cx.entity().clone();
         Button::new(format!("attach-menu-{}", agent.config.id))
             .ghost()
@@ -689,7 +750,11 @@ impl Workspace {
                 let view = view.clone();
                 menu.item(PopupMenuItem::new(label).icon(IconName::File).on_click(
                     move |_, window, cx| {
-                        view.update(cx, |this, cx| this.choose_attachments(window, cx));
+                        view.update(cx, |this, cx| {
+                            if this.activate_session_pane(pane_id, agent_id, cx) {
+                                this.choose_attachments(window, cx);
+                            }
+                        });
                     },
                 ))
                 .min_w(px(160.))
@@ -713,6 +778,8 @@ impl Workspace {
         let pending = agent.setting_pending();
         let choices = option.choices.clone();
         let current = option.current.clone();
+        let pane_id = self.pane_id;
+        let agent_id = agent.config.id;
         let view = cx.entity().clone();
         Some(
             Button::new(format!("mode-select-{}", agent.config.id))
@@ -731,6 +798,9 @@ impl Workspace {
                                 .checked(choice.value == current)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
+                                        if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                            return;
+                                        }
                                         this.select_config_option(
                                             project_index,
                                             agent_index,
@@ -789,6 +859,8 @@ impl Workspace {
                     .rounded_full()
                     .bg(palette.color(if active { BG } else { MUTED })),
             );
+        let pane_id = self.pane_id;
+        let agent_id = agent.config.id;
         let view = cx.entity().clone();
         // The label and switch explain themselves, so there is no tooltip.
         // Assistive technology hears "Plan, switch" with its on/off state.
@@ -821,6 +893,9 @@ impl Workspace {
                 .on_change(move |_, event, window, cx| {
                     let value = plan.next.clone();
                     view.update(cx, |this, cx| {
+                        if !this.activate_session_pane(pane_id, agent_id, cx) {
+                            return;
+                        }
                         this.select_config_option(
                             project_index,
                             agent_index,
@@ -858,6 +933,8 @@ impl Workspace {
                 Some(option) if selectable && !option.choices.is_empty() => {
                     let choices = option.choices.clone();
                     let current = option.current.clone();
+                    let pane_id = self.pane_id;
+                    let agent_id = agent.config.id;
                     let view = cx.entity().clone();
                     row.child(
                         Button::new(format!("model-select-{}", agent.config.id))
@@ -878,6 +955,11 @@ impl Workspace {
                                                 .checked(choice.value == current)
                                                 .on_click(move |_, _, cx| {
                                                     view.update(cx, |this, cx| {
+                                                        if !this.activate_session_pane(
+                                                            pane_id, agent_id, cx,
+                                                        ) {
+                                                            return;
+                                                        }
                                                         this.select_config_option(
                                                             project_index,
                                                             agent_index,
@@ -903,6 +985,8 @@ impl Workspace {
         {
             let choices = option.choices.clone();
             let current = option.current.clone();
+            let pane_id = self.pane_id;
+            let agent_id = agent.config.id;
             let view = cx.entity().clone();
             row = row.child(
                 Button::new(format!("effort-select-{}", agent.config.id))
@@ -921,6 +1005,9 @@ impl Workspace {
                                     .checked(choice.value == current)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
+                                            if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                                return;
+                                            }
                                             this.select_config_option(
                                                 project_index,
                                                 agent_index,
@@ -953,6 +1040,8 @@ impl Workspace {
                 compact_tokens(size)
             );
             let can_reset = used > 0;
+            let pane_id = self.pane_id;
+            let agent_id = agent.config.id;
             let view = cx.entity().clone();
             row = row.child(
                 Button::new(format!("context-{}", agent.config.id))
@@ -983,6 +1072,9 @@ impl Workspace {
                                     .disabled(!can_reset)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
+                                            if !this.activate_session_pane(pane_id, agent_id, cx) {
+                                                return;
+                                            }
                                             this.reset_context(project_index, agent_index, cx);
                                         });
                                     }),

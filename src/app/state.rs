@@ -57,9 +57,6 @@ pub(super) struct ConversationState {
     pub(super) max_rows: usize,
     pub(super) viewport_height: f32,
     pub(super) base_line_height: f32,
-    pub(super) session_composers: HashMap<u64, Entity<TextareaState>>,
-    pub(super) draft_images: HashMap<u64, Vec<ChatImage>>,
-    pub(super) draft_files: HashMap<u64, Vec<ChatFile>>,
     pub(super) file_dialog_open: bool,
     pub(super) chat_list: ListState,
     pub(super) chat_list_agent: Option<u64>,
@@ -203,6 +200,36 @@ impl SyncState {
 }
 
 impl ConversationState {
+    pub(super) fn new(composer: Entity<TextareaState>, window: &Window, font_scale: f32) -> Self {
+        let (viewport_height, base_line_height) = Self::composer_geometry(window);
+        let (file_scan_tx, file_scan_rx) = mpsc::channel();
+        ConversationState {
+            renaming: None,
+            file_dialog_open: false,
+            composer,
+            max_rows: Self::composer_max_rows(viewport_height, base_line_height, font_scale),
+            viewport_height,
+            base_line_height,
+            chat_list: ListState::new(0, ListAlignment::Bottom, px(300.)),
+            chat_list_agent: None,
+            chat_rows: Vec::new(),
+            collapsed_tool_groups: HashSet::new(),
+            expanded_tool_history: HashSet::new(),
+            expanded_tool_rows: HashSet::new(),
+            expanded_thought_rows: HashSet::new(),
+            prompt_recall: None,
+            slash_selection: 0,
+            slash_dismissed: false,
+            file_search: None,
+            file_search_project: None,
+            file_scan_tx,
+            file_scan_rx,
+            file_scan_generation: 0,
+            file_selection: 0,
+            file_dismissed: false,
+        }
+    }
+
     pub(super) fn composer_geometry(window: &Window) -> (f32, f32) {
         (
             f32::from(window.viewport_size().height),
@@ -252,11 +279,6 @@ impl ConversationState {
         self.max_rows = max_rows;
         self.composer
             .update(cx, |input, cx| input.set_auto_grow(1, max_rows, cx));
-        for composer in self.session_composers.values() {
-            if composer.entity_id() != self.composer.entity_id() {
-                composer.update(cx, |input, cx| input.set_auto_grow(1, max_rows, cx));
-            }
-        }
     }
 }
 

@@ -1,7 +1,7 @@
 use super::*;
 
 impl Workspace {
-    pub(super) fn render_picker(&self, mut chat: Div, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_picker(&self, mut chat: Div, cx: &mut Context<Self>) -> Div {
         let palette = theme::palette(cx);
         let WorkspaceView::NewSession { step, return_to } = self.view else {
             return chat;
@@ -75,7 +75,7 @@ impl Workspace {
                                 .size(px(16.))
                                 .text_color(palette.color(MUTED)),
                         )
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                             this.select_folder(path.clone(), window, cx)
                         })),
                 );
@@ -143,7 +143,7 @@ impl Workspace {
                                 .size(px(16.))
                                 .text_color(palette.color(MUTED)),
                         )
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, window, cx| {
                             this.start_agent(command.clone(), Some(name.clone()), window, cx)
                         })),
                 );
@@ -176,9 +176,9 @@ impl Workspace {
                                 .text_color(palette.color(MUTED))
                                 .child(query.trim().to_owned()),
                         )
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.start_custom_agent(window, cx)),
-                        ),
+                        .on_click(self.pane_listener(cx, |this, _, window, cx| {
+                            this.start_custom_agent(window, cx)
+                        })),
                 );
             }
         }
@@ -236,7 +236,7 @@ impl Workspace {
                                                 style.bg(palette.color(HOVER)).text_color(palette.color(TEXT))
                                             })
                                             .child(if is_folders { "Close" } else { "Back" })
-                                            .on_click(cx.listener(|this, _, window, cx| {
+                                            .on_click(self.pane_listener(cx, |this, _, window, cx| {
                                                 this.back_from_picker(window, cx)
                                             })),
                                     )
@@ -315,7 +315,7 @@ impl Workspace {
                                             .text_color(palette.color(ACCENT)),
                                     )
                                     .child("Choose Folder…")
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                    .on_click(self.pane_listener(cx, |this, _, window, cx| {
                                         this.choose_folder(window, cx)
                                     })),
                             )

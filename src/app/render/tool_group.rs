@@ -92,7 +92,7 @@ impl Workspace {
                             .child(format!("{action_count} steps")),
                     )
                 })
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .on_click(self.pane_listener(cx, move |this, _, _, cx| {
                     if !this.conversation.collapsed_tool_groups.insert(group_key) {
                         this.conversation.collapsed_tool_groups.remove(&group_key);
                     }
@@ -122,7 +122,7 @@ impl Workspace {
                         )
                         .child(format!("{completed_count} completed steps"))
                         .child(if history_expanded { "⌄" } else { "›" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, _, cx| {
                             if !this.conversation.expanded_tool_history.insert(group_key) {
                                 this.conversation.expanded_tool_history.remove(&group_key);
                             }
@@ -176,7 +176,7 @@ impl Workspace {
                         .tooltip(move |window, cx| {
                             Tooltip::new("Show command and output").build(window, cx)
                         })
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(self.pane_listener(cx, move |this, _, _, cx| {
                             if !this.conversation.expanded_tool_rows.insert(row_key) {
                                 this.conversation.expanded_tool_rows.remove(&row_key);
                             }

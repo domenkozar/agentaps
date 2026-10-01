@@ -645,6 +645,7 @@ fn zoom_shortcuts_and_menu_actions_change_the_font_scale(cx: &mut gpui_kit::Test
     mobile::verify_session_switching_and_mobile_routing(&restored, temp.path(), cx);
     verify_resets_and_folder_moves_preserve_harness_references(&restored, temp.path(), cx);
     verify_inline_session_renaming(&restored, cx);
+    verify_split_panes(&restored, temp.path(), cx);
     // SAFETY: restore the process environment modified for this test.
     unsafe {
         if let Some(original) = original_config_home {
@@ -830,4 +831,269 @@ fn verify_inline_session_renaming(
             });
         });
     }
+}
+
+fn verify_split_panes(
+    workspace: &Entity<Workspace>,
+    path: &Path,
+    cx: &mut gpui_kit::VisualTestContext,
+) {
+    use crate::panes::{Direction, Layout, Node};
+    let first_file = path.join("first-pane.txt");
+    let second_file = path.join("second-pane.txt");
+    std::fs::write(&first_file, "First pane attachment").unwrap();
+    std::fs::write(&second_file, "Second pane attachment").unwrap();
+    cx.update(|window, cx| {
+        workspace.update(cx, |this, cx| {
+            let mut agents = Vec::new();
+            for id in [701, 702] {
+                let mut agent = test_agent(ProtocolVersion::V2);
+                agent.config.id = id;
+                agent.status = Status::Connecting;
+                agent.active_work = false;
+                for index in 0..40 {
+                    agent.log(Role::User, format!("Session {id}, message {index}"));
+                }
+                agents.push(AgentView {
+                    controller: agent,
+                    elicitations: Vec::new(),
+                });
+            }
+            this.projects = vec![ProjectView {
+                path: path.to_owned(),
+                ssh_host: None,
+                branch: "main".into(),
+                sync_counts: None,
+                agents,
+            }];
+            this.sidebar_order = vec![701, 702];
+            this.deferred_connections.clear();
+            this.pane_layout = Layout::default();
+            this.pane_id = 1;
+            this.next_pane_id = 2;
+            this.inactive_panes.clear();
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 0,
+                }),
+                window,
+                cx,
+            );
+            this.pane_bounds.insert(
+                1,
+                std::rc::Rc::new(std::cell::Cell::new(Bounds::new(
+                    Default::default(),
+                    size(px(1200.), px(800.)),
+                ))),
+            );
+            this.split_pane(Direction::Right, window, cx);
+            assert_eq!(this.pane_id, 3);
+            assert_eq!(this.view, WorkspaceView::Empty);
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 1,
+                }),
+                window,
+                cx,
+            );
+            this.sync_chat_rows(0, 1);
+            this.conversation.chat_list.scroll_to(gpui_kit::ListOffset {
+                item_ix: 5,
+                offset_in_item: px(0.),
+            });
+            this.conversation.composer.update(cx, |input, cx| {
+                input.set_value("second pane prompt", window, cx);
+                input.focus(window, cx);
+            });
+            this.with_pane(1, cx, |this, cx| {
+                this.drop_paths(
+                    &gpui_kit::ExternalPaths([first_file.clone()].into_iter().collect()),
+                    cx,
+                );
+                this.sync_chat_rows(0, 0);
+                this.conversation.chat_list.scroll_to(gpui_kit::ListOffset {
+                    item_ix: 12,
+                    offset_in_item: px(0.),
+                });
+                this.conversation.composer.update(cx, |input, cx| {
+                    input.set_value("first pane draft", window, cx)
+                });
+            });
+            assert_eq!(
+                this.pane_id, 3,
+                "rendering another pane must preserve focus"
+            );
+            this.choose_attachments(window, cx);
+        });
+    });
+    cx.run_until_parked();
+    // The composer focused by keyboard remains the routing source even if the
+    // sidebar/pane selection changes before its input event is delivered.
+    cx.update(|_, cx| {
+        workspace.update(cx, |this, cx| {
+            this.activate_pane(1, cx);
+        });
+    });
+    assert!(cx.did_prompt_for_paths());
+    cx.simulate_path_prompt_response(|options| {
+        assert!(options.files && options.multiple && !options.directories);
+        Some(vec![second_file.clone()])
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        workspace.update(cx, |this, _| {
+            assert_eq!(
+                this.pane_layout.focused, 1,
+                "the chooser must not steal pane focus"
+            );
+            assert_eq!(this.draft_files[&701][0].name, "first-pane.txt");
+            assert_eq!(this.draft_files[&702][0].name, "second-pane.txt");
+        })
+    });
+    cx.dispatch_action(Enter {
+        secondary: false,
+        shift: false,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        workspace.update(cx, |this, cx| {
+            assert_eq!(this.pane_layout.focused, 3);
+            assert_eq!(
+                this.projects[0].agents[1].config.pending_prompts[0].text,
+                "second pane prompt"
+            );
+            assert_eq!(
+                this.projects[0].agents[1].config.pending_prompts[0].files[0].name,
+                "second-pane.txt"
+            );
+            assert!(this.projects[0].agents[0].config.pending_prompts.is_empty());
+            assert_eq!(this.conversation.chat_list.logical_scroll_top().item_ix, 5);
+            this.with_pane(1, cx, |this, cx| {
+                assert_eq!(
+                    this.conversation.composer.read(cx).value().as_ref(),
+                    "first pane draft"
+                );
+                assert_eq!(this.conversation.chat_list.logical_scroll_top().item_ix, 12);
+            });
+            // Sidebar selection focuses the existing pane instead of displaying
+            // the same session in two panes.
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 0,
+                }),
+                window,
+                cx,
+            );
+            assert_eq!(this.pane_id, 1);
+            assert_eq!(
+                this.saved_pane_layout().root.panes(),
+                [(1, Some(701)), (3, Some(702))]
+            );
+            this.diff.visible = true;
+            this.diff.counts = Some((99, 99));
+            let request = this.diff.request_id;
+            this.activate_pane(3, cx);
+            assert!(this.diff.visible);
+            assert_ne!(this.diff.request_id, request);
+            assert_eq!(this.diff.counts, None);
+            this.persist();
+            this.persistence.wait().unwrap();
+        });
+    });
+    let saved = config::load().unwrap().0.pane_layout.unwrap();
+    assert_eq!(saved.root.panes(), [(1, Some(701)), (3, Some(702))]);
+    assert_eq!(saved.focused, 3);
+    // Exercise pane-bound callbacks after closing their source pane.
+    let callback = cx.update(|_, cx| {
+        workspace.update(cx, |this, cx| {
+            this.pane_listener(cx, |this, _: &(), window, cx| this.send_prompt(window, cx))
+        })
+    });
+    cx.update(|window, cx| {
+        workspace.update(cx, |this, cx| {
+            this.close_pane(window, cx);
+            assert_eq!(this.pane_id, 1);
+            assert!(matches!(this.pane_layout.root, Node::Pane { id: 1, .. }));
+            assert!(!this.projects[0].agents[1].config.archived);
+        });
+        callback(&(), window, cx);
+        workspace.update(cx, |this, cx| {
+            assert_eq!(
+                this.conversation.composer.read(cx).value().as_ref(),
+                "first pane draft"
+            );
+            assert!(this.projects[0].agents[0].config.pending_prompts.is_empty());
+            // A hidden session's draft follows it to another pane, and survives
+            // closing that pane. Drafts belong to sessions, not presentation slots.
+            let mut third = test_agent(ProtocolVersion::V2);
+            third.config.id = 703;
+            third.status = Status::Connecting;
+            third.active_work = false;
+            this.projects[0].agents.push(AgentView {
+                controller: third,
+                elicitations: Vec::new(),
+            });
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 2,
+                }),
+                window,
+                cx,
+            );
+            this.pane_bounds.insert(
+                1,
+                std::rc::Rc::new(std::cell::Cell::new(Bounds::new(
+                    Default::default(),
+                    size(px(800.), px(800.)),
+                ))),
+            );
+            this.split_pane(Direction::Down, window, cx);
+            let moved_pane = this.pane_id;
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 0,
+                }),
+                window,
+                cx,
+            );
+            assert_eq!(this.pane_id, moved_pane);
+            assert_eq!(this.draft_files[&701][0].name, "first-pane.txt");
+            assert_eq!(
+                this.conversation.composer.read(cx).value().as_ref(),
+                "first pane draft"
+            );
+            this.close_pane(window, cx);
+            this.set_view(
+                WorkspaceView::Conversation(SessionLocation {
+                    project_index: 0,
+                    agent_index: 0,
+                }),
+                window,
+                cx,
+            );
+            assert_eq!(
+                this.conversation.composer.read(cx).value().as_ref(),
+                "first pane draft"
+            );
+            // Archived sessions disappear from their pane without affecting
+            // another session or an agent process.
+            this.projects[0].agents[0].config.archived = true;
+            this.render_panes(window, cx);
+            assert_eq!(this.view, WorkspaceView::Empty);
+            this.restore_panes(Some(saved.clone()), window, cx);
+            assert_eq!(this.pane_layout.focused, 3);
+            assert_eq!(
+                this.saved_pane_layout().root.panes(),
+                [(2, None), (3, Some(702))]
+            );
+            assert_eq!(this.view.displayed_session().unwrap().agent_index, 1);
+            this.close_pane(window, cx);
+            assert_eq!(this.view, WorkspaceView::Empty);
+        });
+    });
 }

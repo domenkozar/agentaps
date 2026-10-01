@@ -3,7 +3,7 @@ use crate::diff_view::{self, Presentation};
 use gpui_kit::component::{Sizable, spinner::Spinner};
 
 impl Workspace {
-    pub(super) fn render_diff(&self, panel: Div, cx: &mut Context<Self>) -> Div {
+    pub(in crate::app) fn render_diff(&self, panel: Div, cx: &mut Context<Self>) -> Div {
         let palette = theme::palette(cx);
         let (added, removed) = self
             .diff
