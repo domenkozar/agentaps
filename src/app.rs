@@ -43,6 +43,7 @@ use std::{
 
 mod agent;
 mod attachments;
+mod panes;
 mod state;
 use state::*;
 mod assets;
@@ -455,12 +456,23 @@ impl PromptRecall {
 }
 
 struct Workspace {
+    workspace_focus: gpui_kit::FocusHandle,
+    pane_focus: gpui_kit::FocusHandle,
+    pane_area_bounds: std::rc::Rc<std::cell::Cell<Bounds<gpui_kit::Pixels>>>,
+    pane_layout: crate::panes::Layout,
+    pane_id: u64,
+    next_pane_id: u64,
+    inactive_panes: HashMap<u64, panes::PaneState>,
+    pane_bounds: HashMap<u64, std::rc::Rc<std::cell::Cell<Bounds<gpui_kit::Pixels>>>>,
     projects: Vec<ProjectView>,
     view: WorkspaceView,
     sidebar_order: Vec<u64>,
     sidebar_fraction: f32,
     font_scale: f32,
     theme_choice: crate::appearance::Choice,
+    session_composers: HashMap<u64, Entity<TextareaState>>,
+    draft_images: HashMap<u64, Vec<ChatImage>>,
+    draft_files: HashMap<u64, Vec<ChatFile>>,
     conversation: ConversationState,
     next_agent_id: u64,
     events_tx: Sender<Event>,
@@ -595,9 +607,21 @@ impl Workspace {
             composer,
             window,
             |this, input, event: &InputEvent, window, cx| {
-                if input.entity_id() != this.conversation.composer.entity_id() {
+                let Some(pane_id) = this.composer_pane(input) else {
+                    return;
+                };
+                if !matches!(
+                    event,
+                    InputEvent::Focus
+                        | InputEvent::Change
+                        | InputEvent::PressEnter {
+                            secondary: false,
+                            shift: false
+                        }
+                ) {
                     return;
                 }
+                this.activate_pane(pane_id, cx);
                 match event {
                     InputEvent::Change => {
                         if this
@@ -629,31 +653,56 @@ impl Workspace {
     }
 
     fn set_view(&mut self, view: WorkspaceView, window: &mut Window, cx: &mut Context<Self>) {
+        if let WorkspaceView::Conversation(session) = view {
+            let agent_id = self.projects[session.project_index].agents[session.agent_index]
+                .config
+                .id;
+            if let Some((id, _)) = self
+                .saved_pane_layout()
+                .root
+                .panes()
+                .into_iter()
+                .find(|(id, session)| *id != self.pane_id && *session == Some(agent_id))
+            {
+                self.activate_pane(id, cx);
+                return;
+            }
+        }
+        self.set_pane_view(view, window, cx);
+    }
+
+    fn set_pane_view(&mut self, view: WorkspaceView, window: &mut Window, cx: &mut Context<Self>) {
         self.finish_rename_session(true, cx);
         if let Some(session) = view.displayed_session() {
             let agent_id = self.projects[session.project_index].agents[session.agent_index]
                 .config
                 .id;
-            if !self.conversation.session_composers.contains_key(&agent_id) {
-                let composer = if self.conversation.session_composers.is_empty() {
-                    self.conversation.composer.clone()
-                } else {
-                    let composer = ConversationState::new_composer(window, cx);
-                    self.subscribe_composer(&composer, window, cx);
-                    composer
-                };
-                self.conversation
-                    .session_composers
-                    .insert(agent_id, composer);
+            if !self.session_composers.contains_key(&agent_id) {
+                let composer =
+                    if !self.session_composers.values().any(|composer| {
+                        composer.entity_id() == self.conversation.composer.entity_id()
+                    }) {
+                        self.conversation.composer.clone()
+                    } else {
+                        let composer = ConversationState::new_composer(window, cx);
+                        self.subscribe_composer(&composer, window, cx);
+                        composer
+                    };
+                self.session_composers.insert(agent_id, composer);
             }
-            self.conversation.composer = self.conversation.session_composers[&agent_id].clone();
+            let composer = self.session_composers[&agent_id].clone();
+            if self.conversation.composer.entity_id() != composer.entity_id() {
+                self.conversation.max_rows = 0;
+            }
+            self.conversation.composer = composer;
             if self.deferred_connections.contains(&agent_id) {
                 self.connect(session.project_index, session.agent_index);
             }
         }
         if self.view.displayed_session() != view.displayed_session() {
             self.conversation.prompt_recall = None;
-            self.close_diff();
+            // The shared diff remains open and follows the focused session.
+            self.diff.selected_file = None;
             self.diff.error = None;
             self.diff.rows = Arc::new(Vec::new());
             self.diff.list = ListState::new(0, ListAlignment::Top, px(28.));
@@ -703,7 +752,11 @@ impl Workspace {
             self.sidebar_selection = 0;
         }
         self.view = view;
-        self.mark_displayed_agent_viewed();
+        self.pane_layout.root = self.saved_pane_layout().root;
+        self.persistence.dirty = true;
+        if self.pane_id == self.pane_layout.focused {
+            self.mark_displayed_agent_viewed();
+        }
     }
 
     fn open_diff(&mut self, project_index: usize, cx: &mut Context<Self>) {
@@ -849,37 +902,8 @@ impl Workspace {
                     _ => {}
                 },
             ),
-            cx.subscribe_in(
-                &picker_input,
-                window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::Change => {
-                        this.picker.selection = 0;
-                        if matches!(
-                            this.view,
-                            WorkspaceView::NewSession {
-                                step: PickerStep::Folders | PickerStep::ChangeFolder { .. },
-                                ..
-                            }
-                        ) {
-                            this.picker
-                                .folder_search
-                                .set_query(&this.picker.input.read(cx).value());
-                        }
-                        cx.notify();
-                    }
-                    InputEvent::PressEnter {
-                        secondary: false,
-                        shift: false,
-                    } => {
-                        this.confirm_picker(window, cx);
-                    }
-                    _ => {}
-                },
-            ),
         ];
         let (events_tx, events_rx) = mpsc::channel();
-        let (file_scan_tx, file_scan_rx) = mpsc::channel();
         let (diff_tx, diff_rx) = mpsc::channel();
         let (diff_watch_tx, diff_watch_rx) = mpsc::channel();
         let (diff_watcher_tx, diff_watcher_rx) = mpsc::channel();
@@ -903,6 +927,7 @@ impl Workspace {
             .max()
             .unwrap_or(0)
             + 1;
+        let saved_layout = config.pane_layout;
         let mut sidebar_order = config.sidebar_order;
         let sidebar_fraction = if config.sidebar_fraction.is_finite() {
             config.sidebar_fraction.clamp(0.1, 0.7)
@@ -968,40 +993,24 @@ impl Workspace {
         }
         let folder_search = FolderSearch::new(recent_folders);
         let mut this = Self {
+            workspace_focus: cx.focus_handle(),
+            pane_focus: cx.focus_handle(),
+            pane_area_bounds: Default::default(),
+            pane_layout: crate::panes::Layout::default(),
+            pane_id: 1,
+            next_pane_id: 2,
+            inactive_panes: HashMap::new(),
+            pane_bounds: HashMap::new(),
             projects,
             view: WorkspaceView::Empty,
             sidebar_order,
             sidebar_fraction,
             font_scale,
             theme_choice,
-            conversation: ConversationState {
-                renaming: None,
-                composer,
-                max_rows: composer_max_rows,
-                viewport_height: composer_viewport_height,
-                base_line_height: composer_base_line_height,
-                session_composers: HashMap::new(),
-                draft_images: HashMap::new(),
-                draft_files: HashMap::new(),
-                file_dialog_open: false,
-                chat_list: ListState::new(0, ListAlignment::Bottom, px(300.)),
-                chat_list_agent: None,
-                chat_rows: Vec::new(),
-                collapsed_tool_groups: HashSet::new(),
-                expanded_tool_history: HashSet::new(),
-                expanded_tool_rows: HashSet::new(),
-                expanded_thought_rows: HashSet::new(),
-                prompt_recall: None,
-                slash_selection: 0,
-                slash_dismissed: false,
-                file_search: None,
-                file_search_project: None,
-                file_scan_tx,
-                file_scan_rx,
-                file_scan_generation: 0,
-                file_selection: 0,
-                file_dismissed: false,
-            },
+            session_composers: HashMap::new(),
+            draft_images: HashMap::new(),
+            draft_files: HashMap::new(),
+            conversation: ConversationState::new(composer, window, font_scale),
             next_agent_id,
             events_tx,
             events_rx,
@@ -1076,6 +1085,8 @@ impl Workspace {
                 crate::theming::set_input_background(Theme::global(cx).input_background(), cx);
                 crate::appearance::system_changed(cx);
             }));
+        let picker_input = this.picker.input.clone();
+        this.subscribe_picker(&picker_input, window, cx);
         let composer = this.conversation.composer.clone();
         this.subscribe_composer(&composer, window, cx);
         this._subscriptions
@@ -1158,6 +1169,7 @@ impl Workspace {
                     .update(cx, |input, cx| input.focus(window, cx));
             }
         }
+        this.restore_panes(saved_layout, window, cx);
         this.refresh_branches(cx);
         let background_executor = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
@@ -1170,25 +1182,7 @@ impl Workspace {
                 let Ok(connecting_session) = this.update_in(cx, |this, window, cx| {
                     this.poll_events(window, cx);
                     this.poll_sync_counts(cx);
-                    if this.picker.folder_search.tick() {
-                        cx.notify();
-                    }
-                    while let Ok(generation) = this.conversation.file_scan_rx.try_recv() {
-                        if this.conversation.file_scan_generation == generation
-                            && let Some(search) = this.conversation.file_search.as_mut()
-                        {
-                            search.scan_complete();
-                            cx.notify();
-                        }
-                    }
-                    if this
-                        .conversation
-                        .file_search
-                        .as_mut()
-                        .is_some_and(FileSearch::tick)
-                    {
-                        cx.notify();
-                    }
+                    this.tick_panes(cx);
                     if last_branch_refresh.elapsed() >= Duration::from_secs(5) {
                         last_branch_refresh = Instant::now();
                         this.refresh_branches(cx);
@@ -1233,6 +1227,7 @@ impl Workspace {
             sidebar_fraction: self.sidebar_fraction,
             font_scale: self.font_scale,
             theme: self.theme_choice,
+            pane_layout: Some(self.saved_pane_layout()),
         }
     }
 
@@ -1297,6 +1292,7 @@ impl Workspace {
             return;
         }
         self.picker.folder_dialog_open = true;
+        let pane_id = self.pane_id;
         let selection = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -1306,6 +1302,9 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let result = selection.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                if !this.activate_pane(pane_id, cx) {
+                    return;
+                }
                 this.picker.folder_dialog_open = false;
                 if !matches!(
                     this.view,
@@ -1806,6 +1805,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_keyboard_pane(window, cx);
         if self
             .sidebar_search
             .read(cx)
@@ -1968,6 +1968,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.activate_keyboard_pane(window, cx);
         if !self
             .conversation
             .composer
@@ -2040,6 +2041,7 @@ impl Workspace {
     }
 
     fn handle_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate_keyboard_pane(window, cx);
         if self.conversation.renaming.is_some() {
             self.finish_rename_session(false, cx);
             self.conversation

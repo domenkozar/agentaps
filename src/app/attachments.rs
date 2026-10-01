@@ -71,6 +71,12 @@ impl Workspace {
             return;
         }
         self.conversation.file_dialog_open = true;
+        let pane_id = self.pane_id;
+        let session_id = self.view.displayed_session().map(|location| {
+            self.projects[location.project_index].agents[location.agent_index]
+                .config
+                .id
+        });
         let selection = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -80,23 +86,33 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let result = selection.await;
             let _ = this.update(cx, |this, cx| {
-                this.conversation.file_dialog_open = false;
-                match result {
-                    Ok(Ok(Some(paths))) => this.attach_paths(&paths, cx),
-                    Ok(Ok(None)) => {}
-                    Ok(Err(error)) => {
-                        this.notice = Some(Notice::Error(format!(
-                            "Could not open file chooser: {error}"
-                        )));
-                        cx.notify();
+                this.with_pane(pane_id, cx, |this, cx| {
+                    this.conversation.file_dialog_open = false;
+                    let current_session = this.view.displayed_session().map(|location| {
+                        this.projects[location.project_index].agents[location.agent_index]
+                            .config
+                            .id
+                    });
+                    if current_session != session_id {
+                        return;
                     }
-                    Err(error) => {
-                        this.notice = Some(Notice::Error(format!(
-                            "File chooser closed unexpectedly: {error}"
-                        )));
-                        cx.notify();
+                    match result {
+                        Ok(Ok(Some(paths))) => this.attach_paths(&paths, cx),
+                        Ok(Ok(None)) => {}
+                        Ok(Err(error)) => {
+                            this.notice = Some(Notice::Error(format!(
+                                "Could not open file chooser: {error}"
+                            )));
+                            cx.notify();
+                        }
+                        Err(error) => {
+                            this.notice = Some(Notice::Error(format!(
+                                "File chooser closed unexpectedly: {error}"
+                            )));
+                            cx.notify();
+                        }
                     }
-                }
+                });
             });
         })
         .detach();
@@ -136,12 +152,7 @@ impl Workspace {
             let agent_id = agent.config.id;
             for file in files {
                 match file {
-                    Ok(file) => self
-                        .conversation
-                        .draft_files
-                        .entry(agent_id)
-                        .or_default()
-                        .push(file),
+                    Ok(file) => self.draft_files.entry(agent_id).or_default().push(file),
                     Err(error) => self.notice = Some(Notice::Error(error)),
                 }
             }
@@ -155,7 +166,7 @@ impl Workspace {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(files) = self.conversation.draft_files.get_mut(&agent_id)
+        if let Some(files) = self.draft_files.get_mut(&agent_id)
             && index < files.len()
         {
             files.remove(index);
@@ -169,7 +180,7 @@ impl Workspace {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(images) = self.conversation.draft_images.get_mut(&agent_id)
+        if let Some(images) = self.draft_images.get_mut(&agent_id)
             && index < images.len()
         {
             images.remove(index);
@@ -196,12 +207,7 @@ impl Workspace {
             let agent_id = agent.config.id;
             for image in images {
                 match image.and_then(|(mime_type, bytes)| self.images.save(&mime_type, &bytes)) {
-                    Ok(image) => self
-                        .conversation
-                        .draft_images
-                        .entry(agent_id)
-                        .or_default()
-                        .push(image),
+                    Ok(image) => self.draft_images.entry(agent_id).or_default().push(image),
                     Err(error) => self.notice = Some(Notice::Error(error)),
                 }
             }

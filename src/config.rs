@@ -200,6 +200,8 @@ pub struct ProjectConfig {
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pane_layout: Option<crate::panes::Layout>,
     #[serde(default)]
     pub theme: crate::appearance::Choice,
     #[serde(default)]
@@ -224,6 +226,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: crate::appearance::Choice::default(),
+            pane_layout: None,
             projects: Vec::new(),
             sidebar_order: Vec::new(),
             sidebar_fraction: default_sidebar_fraction(),
@@ -517,6 +520,7 @@ mod tests {
             sidebar_fraction: 0.32,
             font_scale: 1.25,
             theme: crate::appearance::Choice::SolarizedLight,
+            pane_layout: None,
         };
         let restored: Config =
             serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
@@ -524,6 +528,21 @@ mod tests {
         assert_eq!(restored.sidebar_fraction, 0.32);
         assert_eq!(restored.font_scale, 1.25);
         assert_eq!(restored.theme, crate::appearance::Choice::SolarizedLight);
+    }
+
+    #[test]
+    fn pane_layout_is_optional_in_legacy_configs_and_survives_saving() {
+        let old: Config = serde_json::from_str(r#"{"sidebar_order":[1]}"#).unwrap();
+        assert!(old.pane_layout.is_none());
+        let mut layout = crate::panes::Layout::default();
+        layout.split(1, crate::panes::Direction::Down, 2, 3);
+        let config = Config {
+            pane_layout: Some(layout.clone()),
+            ..old
+        };
+        let restored: Config =
+            serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+        assert_eq!(restored.pane_layout, Some(layout));
     }
 
     #[test]
